@@ -8,7 +8,8 @@ enum UsageMetric: String, CaseIterable, Codable, Sendable {
 enum MenuBarPresentation {
     static func title(snapshot: ProviderSnapshot, metric: UsageMetric) -> String {
         let values = snapshot.windows.map { window in
-            "\(label(window.kind)):\(PercentFormatter.string(value(window, metric: metric)))%"
+            let compact = window.compactLabel ?? label(window.kind)
+            return "\(compact):\(PercentFormatter.string(value(window, metric: metric)))%"
         }
         guard !values.isEmpty else { return snapshot.provider.shortName }
         return snapshot.provider.shortName + " " + values.joined(separator: " / ")
