@@ -39,6 +39,14 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
             NSApp.activate(ignoringOtherApps: true)
             return
         }
+
+        // A controller is retained per provider and may be reused after a
+        // successful sign-in or manual close. Reset one-shot state before each
+        // new browser session so subsequent sign-ins can complete normally.
+        successTask?.cancel()
+        successTask = nil
+        isCompleting = false
+
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 980, height: 760), configuration: configuration)
@@ -66,10 +74,12 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         window?.orderOut(nil)
         window = nil
         webView = nil
+        isCompleting = false
     }
 
     /// Only provider account hosts and their OAuth endpoints may load inside
-    /// the sign-in window; unrelated links open in the user's browser instead.
+    /// the sign-in window. Unexpected destinations are blocked rather than
+    /// inheriting authenticated browser state.
     private func navigationPolicy(for url: URL) -> WKNavigationActionPolicy {
         guard url.scheme == "https" else { return .cancel }
         switch provider {
@@ -112,5 +122,6 @@ extension WebLoginWindowController: WKNavigationDelegate {
         webView?.stopLoading()
         window = nil
         webView = nil
+        isCompleting = false
     }
 }
