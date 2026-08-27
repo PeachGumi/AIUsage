@@ -29,12 +29,21 @@ final class SettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        let registered = Self.sanitized(defaults.stringArray(forKey: Keys.registeredProviders) ?? [])
+        let savedRegistrations = defaults.stringArray(forKey: Keys.registeredProviders)
+        let legacyRegistrations = savedRegistrations == nil ? Self.legacyRegistrations(from: defaults) : nil
+        let registered = Self.sanitized(savedRegistrations ?? legacyRegistrations ?? [])
         registeredProviders = registered
         metric = UsageMetric(rawValue: defaults.string(forKey: Keys.metric) ?? "") ?? .remaining
 
         let savedSelection = ProviderID(rawValue: defaults.string(forKey: Keys.provider) ?? "")
         selectedProvider = savedSelection.flatMap { registered.contains($0) ? $0 : nil } ?? registered.first
+
+        // Preserve the explicit-empty behavior for fresh installs while
+        // migrating users of pre-registration builds exactly once when legacy
+        // settings prove that they had already chosen/reordered providers.
+        if savedRegistrations == nil, legacyRegistrations != nil {
+            defaults.set(registered.map(\.rawValue), forKey: Keys.registeredProviders)
+        }
     }
 
     var addableProviders: [ProviderID] {
@@ -90,9 +99,23 @@ final class SettingsStore: ObservableObject {
         return valid.filter { seen.insert($0).inserted }
     }
 
+    /// Pre-registration builds stored an always-populated `providerOrder`, and
+    /// some users may only have persisted a menu-bar selection. These keys are
+    /// migration signals; their absence still means a genuinely fresh install.
+    private static func legacyRegistrations(from defaults: UserDefaults) -> [String]? {
+        if let order = defaults.stringArray(forKey: Keys.legacyProviderOrder), !order.isEmpty {
+            return order
+        }
+        if let selected = defaults.string(forKey: Keys.provider), ProviderID(rawValue: selected) != nil {
+            return [selected]
+        }
+        return nil
+    }
+
     private enum Keys {
         static let provider = "menuBarProvider"
         static let metric = "usageMetric"
         static let registeredProviders = "registeredProviders"
+        static let legacyProviderOrder = "providerOrder"
     }
 }
