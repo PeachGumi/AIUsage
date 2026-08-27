@@ -1,0 +1,92 @@
+name: Provider stopped working
+description: Report a likely upstream API, authentication, or page-structure change
+title: "[Provider] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AIUsage depends on some non-public/unstable endpoints and page structures, so providers may occasionally change underneath the app.
+
+        **Do not paste OAuth/access tokens, cookies, account IDs, OpenCode workspace IDs, request headers, or full real API/HTML responses.** If the finding is security-sensitive, follow `SECURITY.md` instead.
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - OpenAI Codex
+        - Qwen Cloud
+        - OpenCode Go
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: AIUsage version / commit
+      placeholder: "v1.0.0 or abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 15.6"
+    validations:
+      required: true
+
+  - type: textarea
+    id: state
+    attributes:
+      label: Current behavior
+      description: Quote the short AIUsage error message if useful, but do not include raw authenticated responses.
+      placeholder: "The card now shows ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dashboard
+    attributes:
+      label: Does the provider's official dashboard still show usage normally?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: refresh
+    attributes:
+      label: Did Refresh and re-login help?
+      options:
+        - "No, both were tried"
+        - "Refresh only was tried"
+        - "Re-login only was tried"
+        - "Not tried"
+    validations:
+      required: true
+
+  - type: input
+    id: began
+    attributes:
+      label: When did it start?
+      description: Approximate date/time and timezone are enough.
+      placeholder: "2026-08-28 around 01:00 JST"
+
+  - type: textarea
+    id: sanitized
+    attributes:
+      label: Sanitized observations
+      description: Describe status codes or page changes only after removing all account-specific values. Do not paste full response bodies or authenticated HTML.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I confirmed this issue contains no tokens, cookies, account IDs, workspace IDs, request headers, or full authenticated responses.
+          required: true
+        - label: I checked existing issues for a provider outage/change first.
+          required: true
