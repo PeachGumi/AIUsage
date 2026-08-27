@@ -14,6 +14,7 @@ AIUsageはローカルで動作するメニューバーアプリです。分析S
 ## 保存
 
 - 設定とOpenCode workspace IDは`UserDefaults`へ保存します。
+- 旧GoUsageのworkspace IDが存在する場合は初回移行にだけ利用します。AIUsageで保存後、またはOpenCodeからSign outした後は旧ファイルから再移行しません。
 - OpenCodeとQwenのWebログイン情報はmacOS WebKitの標準データストアが管理します。
 - AIUsageはQwen Cookieの平文コピーを新規作成しません。
 - 旧QwenUsageの平文Cookieは移行フォールバックとして`https://home.qwencloud.com`に対してのみ読み取り可能です。AIUsageで新しいQwenログインが成功した後、またはSign outした後は再利用しません。
@@ -32,4 +33,4 @@ OAuthトークン、Cookie、アカウントID、workspace ID、APIレスポン�
 
 ## データ削除
 
-アプリ内のSign outで、AIUsageのWebKitデータストアにある対象サービスのWebデータを削除できます。旧QwenUsageの移行元ファイルはロールバックを壊さないため削除しませんが、AIUsage側ではSign out後のフォールバック利用を無効化します。
+アプリ内のSign outで、AIUsageのWebKitデータストアにある対象サービスのWebデータを削除できます。OpenCodeの保存済みworkspace IDもSign out時に削除します。旧GoUsageのworkspace IDファイルや旧QwenUsageのCookieファイル自体は変更・削除しませんが、AIUsage側ではSign out後の再移行・フォールバック利用を無効化します。
