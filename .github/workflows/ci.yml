@@ -8,14 +8,46 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-14
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Select Xcode 16
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+      - name: Verify Xcode project contains every Swift file
+        shell: bash
+        run: |
+          set -euo pipefail
+          project='AIUsage.xcodeproj/project.pbxproj'
+
+          duplicate_names="$({
+            while IFS= read -r file; do basename "$file"; done \
+              < <(find Sources Tests -type f -name '*.swift' -print)
+          } | sort | uniq -d)"
+          if [ -n "$duplicate_names" ]; then
+            echo "::error::Duplicate Swift basenames make the project-membership check ambiguous:"
+            echo "$duplicate_names"
+            exit 1
+          fi
+
+          missing=0
+          while IFS= read -r file; do
+            name="$(basename "$file")"
+            count="$(grep -F -c "$name in Sources" "$project" || true)"
+            if [ "$count" -lt 2 ]; then
+              echo "::error file=$file::Swift file is not registered in the Xcode project's Sources build phase"
+              missing=1
+            fi
+          done < <(find Sources Tests -type f -name '*.swift' -print | sort)
+          exit "$missing"
+      - name: Validate release script
+        run: bash -n Scripts/build_release.sh
       - name: Unit tests
         run: |
           set -o pipefail
@@ -23,7 +55,8 @@ jobs:
             -project AIUsage.xcodeproj \
             -scheme AIUsage \
             -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
       - name: Release build
         run: |
           set -o pipefail
@@ -31,4 +64,5 @@ jobs:
             -project AIUsage.xcodeproj \
             -scheme AIUsage \
             -configuration Release \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES

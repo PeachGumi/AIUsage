@@ -76,9 +76,16 @@ enum CodexUsageError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidResponse: "OpenAI returned invalid Codex usage data."
-        case .unauthorized: "Codex login expired. Run codex login again."
-        case let .http(status): "Codex usage request failed (HTTP \(status))."
+        case .invalidResponse:
+            "OpenAI returned unexpected Codex usage data. The usage endpoint may have changed."
+        case .unauthorized:
+            "Codex login expired. Run codex login again, then Refresh."
+        case let .http(status) where status == 429:
+            "Codex is temporarily rate limiting usage requests. Try Refresh again later."
+        case let .http(status) where (500...599).contains(status):
+            "Codex usage service is temporarily unavailable (HTTP \(status)). Try again later."
+        case let .http(status):
+            "Codex usage request failed (HTTP \(status))."
         }
     }
 }

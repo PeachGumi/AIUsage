@@ -22,4 +22,29 @@ final class LoginSuccessRulesTests: XCTestCase {
             provider: .qwen,
             url: URL(string: "https://passport.qwencloud.com/signin")!))
     }
+
+    func testWebsiteDataCleanupMatchesOnlyDomainAndSubdomains() {
+        XCTAssertTrue(AppDelegate.websiteDataRecordName("qwencloud.com", matches: "qwencloud.com"))
+        XCTAssertTrue(AppDelegate.websiteDataRecordName("home.qwencloud.com", matches: "qwencloud.com"))
+        XCTAssertTrue(AppDelegate.websiteDataRecordName(".home.qwencloud.com", matches: ".qwencloud.com"))
+
+        XCTAssertFalse(AppDelegate.websiteDataRecordName("fakeqwencloud.com", matches: "qwencloud.com"))
+        XCTAssertFalse(AppDelegate.websiteDataRecordName("qwencloud.com.evil.example", matches: "qwencloud.com"))
+        XCTAssertFalse(AppDelegate.websiteDataRecordName("notopencode.ai", matches: "opencode.ai"))
+    }
+
+    func testPopoverExpandsUntilItWouldExceedScreen() {
+        XCTAssertEqual(
+            StatusItemController.preferredPopoverHeight(providerCount: 0, screenHeight: 1080),
+            280)
+        XCTAssertEqual(
+            StatusItemController.preferredPopoverHeight(providerCount: 3, screenHeight: 1080),
+            688)
+        XCTAssertEqual(
+            StatusItemController.preferredPopoverHeight(providerCount: 4, screenHeight: 1080),
+            878)
+        XCTAssertEqual(
+            StatusItemController.preferredPopoverHeight(providerCount: 5, screenHeight: 1080),
+            1056)
+    }
 }

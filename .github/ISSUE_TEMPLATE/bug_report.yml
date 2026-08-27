@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a reproducible AIUsage application bug
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please remove all credentials and account-specific data before submitting.
+
+        **Never paste OAuth/access tokens, Cookie headers, account IDs, OpenCode workspace IDs, or full real API responses.** For security vulnerabilities, use the private reporting process in `SECURITY.md` instead of a public issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: AIUsage version / commit
+      description: Release version or commit SHA where the problem occurs.
+      placeholder: "v1.0.0 or abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "macOS 15.6"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - OpenAI Codex
+        - Qwen Cloud
+        - OpenCode Go
+        - Multiple providers / application UI
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the visible behavior and the expected behavior. Paraphrase sensitive responses instead of pasting them.
+      placeholder: "After clicking Refresh..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Launch AIUsage
+        2. Open the menu bar popover
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Optional. Include only errors/logs after removing tokens, cookies, account IDs, workspace IDs, URLs containing private IDs, and real API response bodies.
+      render: text
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I confirmed this issue contains no OAuth/access tokens, cookies, account IDs, workspace IDs, or full real API responses.
+          required: true
+        - label: I checked existing issues for the same problem.
+          required: true

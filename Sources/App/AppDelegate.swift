@@ -12,7 +12,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try await qwenCookies.header(for: url)
     })
     private lazy var codexProvider = CodexProvider()
-    private lazy var coordinator = UsageCoordinator(providers: [codexProvider, qwenProvider, openCodeProvider])
+
+    /// Concrete provider implementations live in one registry. The UI catalog
+    /// is ProviderID.allCases, while SettingsStore decides which of these the
+    /// user has explicitly registered. Future providers should plug in here
+    /// without requiring dashboard-specific branching.
+    private lazy var providerImplementations: [any UsageProvider] = [
+        codexProvider,
+        qwenProvider,
+        openCodeProvider,
+    ]
+    private lazy var coordinator = UsageCoordinator(
+        providers: providerImplementations,
+        enabledProviders: settings.registeredProviders)
     private lazy var settingsController = SettingsWindowController(settings: settings)
     private var statusController: StatusItemController?
     private var loginControllers: [ProviderID: WebLoginWindowController] = [:]
@@ -43,11 +55,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
-        openCodeProvider.cancelActiveFetch()
+        for provider in providerImplementations {
+            provider.cancelActiveFetch()
+        }
     }
 
     private func makeActions() -> AppActions {
         AppActions(
+            addProvider: { [weak self] provider in self?.addProvider(provider) },
+            removeProvider: { [weak self] provider in self?.removeProvider(provider) },
             refreshAll: { [weak self] in Task { await self?.coordinator.refreshAll() } },
             refresh: { [weak self] provider in Task { await self?.coordinator.refresh(provider) } },
             login: { [weak self] provider in self?.showLogin(provider) },
@@ -55,6 +71,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openDashboard: { [weak self] provider in self?.openDashboard(provider) },
             showSettings: { [weak self] in self?.settingsController.show() },
             quit: { NSApp.terminate(nil) })
+    }
+
+    private func addProvider(_ provider: ProviderID) {
+        settings.addProvider(provider)
+        coordinator.setEnabledProviders(settings.registeredProviders)
+        Task { await coordinator.refresh(provider) }
+    }
+
+    private func removeProvider(_ provider: ProviderID) {
+        settings.removeProvider(provider)
+        coordinator.setEnabledProviders(settings.registeredProviders)
     }
 
     private func showLogin(_ provider: ProviderID) {
@@ -93,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await removeWebsiteData(matching: ["qwencloud.com", "qianwenai.com"])
             coordinator.markSignedOut(.qwen, message: "Qwen Cloud login is required.")
         case .openCodeGo:
+            workspaceStore.clear()
             await removeWebsiteData(matching: ["opencode.ai"])
             coordinator.markSignedOut(.openCodeGo, message: "OpenCode login is required.")
         case .codex:
@@ -120,6 +148,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    nonisolated static func websiteDataRecordName(_ recordName: String, matches domain: String) -> Bool {
+        let name = recordName.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let domain = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !name.isEmpty, !domain.isEmpty else { return false }
+        return name == domain || name.hasSuffix(".\(domain)")
+    }
+
     private func removeWebsiteData(matching domains: [String]) async {
         let store = WKWebsiteDataStore.default()
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
@@ -128,9 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let matched = records.filter { record in
             domains.contains { domain in
-                let name = record.displayName.lowercased()
-                return name == domain || name.hasSuffix(".\(domain)") || name == domain ||
-                    name.hasSuffix(domain) && name.contains(domain)
+                Self.websiteDataRecordName(record.displayName, matches: domain)
             }
         }
         await withCheckedContinuation { continuation in

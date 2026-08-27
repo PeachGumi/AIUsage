@@ -5,22 +5,26 @@ import SwiftUI
 @MainActor
 final class StatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let popover = NSPopover()
     private let coordinator: UsageCoordinator
     private let settings: SettingsStore
-    private var dashboardWindow: NSWindow?
     private var cancellables: Set<AnyCancellable> = []
 
     init(coordinator: UsageCoordinator, settings: SettingsStore, actions: AppActions) {
         self.coordinator = coordinator
         self.settings = settings
-        self.actions = actions
         super.init()
+
+        let dashboard = DashboardView(coordinator: coordinator, settings: settings, actions: actions)
+        popover.contentViewController = NSHostingController(rootView: dashboard)
+        popover.behavior = .transient
+        popover.animates = true
+
         configureButton()
         observeChanges()
+        updatePopoverSize()
         render()
     }
-
-    private let actions: AppActions
 
     private func configureButton() {
         guard let button = statusItem.button else { return }
@@ -46,55 +50,77 @@ final class StatusItemController: NSObject {
     }
 
     private func observeChanges() {
-        Publishers.CombineLatest3(settings.$selectedProvider, settings.$metric, coordinator.$snapshots)
+        Publishers.CombineLatest4(
+            settings.$selectedProvider,
+            settings.$metric,
+            settings.$registeredProviders,
+            coordinator.$snapshots)
             .combineLatest(coordinator.$errors)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.render() }
+            .sink { [weak self] _ in
+                self?.updatePopoverSize()
+                self?.render()
+            }
             .store(in: &cancellables)
     }
 
-    /// Left click cycles the displayed provider (users switch often);
-    /// right click (or command-click) opens the dashboard window.
+    /// A menu bar click toggles the dashboard directly under the status item.
+    /// Provider selection remains available by clicking a card in the popover.
     @objc private func handleClick() {
-        guard let event = NSApp.currentEvent else { cycleProvider(); return }
-        if event.type == .rightMouseUp || event.modifierFlags.contains(.command) {
-            showDashboard(actions: actions)
-        } else {
-            cycleProvider()
-        }
-    }
-
-    private func cycleProvider() {
-        // Cycle through the user's dashboard order rather than the raw enum.
-        let order = settings.providerOrder
-        guard let index = order.firstIndex(of: settings.selectedProvider) else { return }
-        settings.selectedProvider = order[(index + 1) % order.count]
-    }
-
-    private func showDashboard(actions: AppActions) {
-        if let window = dashboardWindow {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
             return
         }
-        let dashboard = DashboardView(coordinator: coordinator, settings: settings, actions: actions)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 640),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false)
-        window.title = "AI Usage"
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: dashboard)
-        window.center()
-        dashboardWindow = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+
+        // Re-evaluate the current screen at open time in case the menu bar was
+        // moved between displays. The popover grows with the number of cards
+        // and only becomes scroll-constrained when it would exceed the screen.
+        updatePopoverSize()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+
+        Task { @MainActor [weak self] in
+            await self?.coordinator.refreshIfStale(olderThan: 60)
+        }
+    }
+
+    private func updatePopoverSize() {
+        let screenHeight = statusItem.button?.window?.screen?.visibleFrame.height
+            ?? NSScreen.main?.visibleFrame.height
+            ?? 900
+        popover.contentSize = NSSize(
+            width: 430,
+            height: Self.preferredPopoverHeight(
+                providerCount: settings.registeredProviders.count,
+                screenHeight: screenHeight))
+    }
+
+    /// Keep small/medium provider sets fully expanded. Scrolling is only
+    /// required when the estimated natural card stack would exceed the usable
+    /// display height.
+    nonisolated static func preferredPopoverHeight(providerCount: Int, screenHeight: CGFloat) -> CGFloat {
+        let safeScreenHeight = max(320, screenHeight - 24)
+        if providerCount <= 0 {
+            return min(280, safeScreenHeight)
+        }
+        let chromeHeight: CGFloat = 118
+        let estimatedCardHeight: CGFloat = 190
+        let naturalHeight = chromeHeight + CGFloat(providerCount) * estimatedCardHeight
+        return min(max(320, naturalHeight), safeScreenHeight)
     }
 
     private func render() {
         guard let button = statusItem.button else { return }
-        let provider = settings.selectedProvider
+        guard let provider = settings.selectedProvider else {
+            let image = renderEmptyImage()
+            statusItem.length = image.size.width + 8
+            button.image = image
+            button.toolTip = "AIUsage: no providers added\nClick: add a provider"
+            button.setAccessibilityLabel("AIUsage, no providers added. Click to add a provider")
+            return
+        }
+
         let snapshot = coordinator.snapshots[provider]
         let hasError = coordinator.errors[provider] != nil
         let title = displayTitle(provider: provider, snapshot: snapshot, hasError: hasError)
@@ -102,7 +128,7 @@ final class StatusItemController: NSObject {
         statusItem.length = image.size.width + 8
         button.image = image
         let tooltip = accessibilityText(provider: provider, snapshot: snapshot, hasError: hasError)
-        button.toolTip = tooltip + "\nClick: switch service · Right-click: details"
+        button.toolTip = tooltip + "\nClick: show details"
         button.setAccessibilityLabel("AIUsage, \(tooltip)")
     }
 
@@ -122,6 +148,19 @@ final class StatusItemController: NSObject {
             return "\(window.label) \(PercentFormatter.string(value)) percent \(metric)"
         }.joined(separator: ", ")
         return "\(provider.displayName): \(values)\(hasError ? ", showing stale data" : "")"
+    }
+
+    private func renderEmptyImage() -> NSImage {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let attributed = NSAttributedString(string: "AI +", attributes: attributes)
+        let size = attributed.size()
+        return NSImage(size: NSSize(width: ceil(size.width), height: 18), flipped: false) { rect in
+            attributed.draw(at: NSPoint(x: 0, y: (rect.height - size.height) / 2))
+            return true
+        }
     }
 
     private func renderImage(

@@ -39,6 +39,12 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
             NSApp.activate(ignoringOtherApps: true)
             return
         }
+
+        // A controller is retained per provider and may be reused after a
+        // successful sign-in or manual close. Reset one-shot state before each
+        // new browser session so subsequent sign-ins can complete normally.
+        cancelPendingSuccess()
+
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 980, height: 760), configuration: configuration)
@@ -60,8 +66,7 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
     }
 
     func close() {
-        successTask?.cancel()
-        successTask = nil
+        cancelPendingSuccess()
         webView?.stopLoading()
         window?.orderOut(nil)
         window = nil
@@ -69,7 +74,8 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
     }
 
     /// Only provider account hosts and their OAuth endpoints may load inside
-    /// the sign-in window; unrelated links open in the user's browser instead.
+    /// the sign-in window. Unexpected destinations are blocked rather than
+    /// inheriting authenticated browser state.
     private func navigationPolicy(for url: URL) -> WKNavigationActionPolicy {
         guard url.scheme == "https" else { return .cancel }
         switch provider {
@@ -84,7 +90,16 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
     }
 
     private func handlePossibleSuccess(url: URL) {
-        guard !isCompleting, LoginSuccessRules.isSuccess(provider: provider, url: url) else { return }
+        guard LoginSuccessRules.isSuccess(provider: provider, url: url) else {
+            // A dashboard can finish loading briefly before its client-side auth
+            // redirect. If that redirect reaches a login page within the grace
+            // period, invalidate the earlier success candidate instead of
+            // closing the window as if authentication had succeeded.
+            cancelPendingSuccess()
+            return
+        }
+        guard !isCompleting else { return }
+
         isCompleting = true
         successTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
@@ -93,10 +108,20 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
             onSuccess(url)
         }
     }
+
+    private func cancelPendingSuccess() {
+        successTask?.cancel()
+        successTask = nil
+        isCompleting = false
+    }
 }
 
 extension WebLoginWindowController: WKNavigationDelegate {
-    public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void)
+    {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         decisionHandler(navigationPolicy(for: url))
     }
@@ -107,8 +132,7 @@ extension WebLoginWindowController: WKNavigationDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        successTask?.cancel()
-        successTask = nil
+        cancelPendingSuccess()
         webView?.stopLoading()
         window = nil
         webView = nil

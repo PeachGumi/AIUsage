@@ -209,7 +209,11 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
 }
 
 extension OpenCodeGoProvider: WKNavigationDelegate {
-    public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void)
+    {
         guard let url = navigationAction.request.url, isAllowedScraperURL(url) else {
             decisionHandler(.cancel)
             complete(generation: activeGeneration, .failure(OpenCodeGoError.navigation("blocked navigation to an unexpected host")))

@@ -133,10 +133,18 @@ enum QwenUsageError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .notLoggedIn: "Qwen Cloud login is required."
-        case .noActiveSubscription: "No active Qwen Token Plan usage was returned."
-        case .invalidResponse: "Qwen Cloud returned invalid usage data."
-        case let .http(status): "Qwen Cloud request failed (HTTP \(status))."
+        case .notLoggedIn:
+            "Qwen Cloud login is required. Sign in from the Qwen card, then Refresh."
+        case .noActiveSubscription:
+            "No active Qwen Token Plan usage was returned. Check the official Qwen dashboard."
+        case .invalidResponse:
+            "Qwen Cloud returned unexpected usage data. The usage API may have changed."
+        case let .http(status) where status == 429:
+            "Qwen Cloud is temporarily rate limiting usage requests. Try Refresh again later."
+        case let .http(status) where (500...599).contains(status):
+            "Qwen Cloud usage service is temporarily unavailable (HTTP \(status)). Try again later."
+        case let .http(status):
+            "Qwen Cloud request failed (HTTP \(status))."
         }
     }
 }
