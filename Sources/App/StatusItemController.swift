@@ -17,12 +17,12 @@ final class StatusItemController: NSObject {
 
         let dashboard = DashboardView(coordinator: coordinator, settings: settings, actions: actions)
         popover.contentViewController = NSHostingController(rootView: dashboard)
-        popover.contentSize = NSSize(width: 430, height: 640)
         popover.behavior = .transient
         popover.animates = true
 
         configureButton()
         observeChanges()
+        updatePopoverSize()
         render()
     }
 
@@ -50,10 +50,17 @@ final class StatusItemController: NSObject {
     }
 
     private func observeChanges() {
-        Publishers.CombineLatest3(settings.$selectedProvider, settings.$metric, coordinator.$snapshots)
+        Publishers.CombineLatest4(
+            settings.$selectedProvider,
+            settings.$metric,
+            settings.$registeredProviders,
+            coordinator.$snapshots)
             .combineLatest(coordinator.$errors)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.render() }
+            .sink { [weak self] _ in
+                self?.updatePopoverSize()
+                self?.render()
+            }
             .store(in: &cancellables)
     }
 
@@ -66,19 +73,54 @@ final class StatusItemController: NSObject {
             return
         }
 
+        // Re-evaluate the current screen at open time in case the menu bar was
+        // moved between displays. The popover grows with the number of cards
+        // and only becomes scroll-constrained when it would exceed the screen.
+        updatePopoverSize()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
 
-        // Opening the dashboard is a strong signal that the user wants current
-        // data. Avoid needless traffic when the background refresh is recent.
         Task { @MainActor [weak self] in
             await self?.coordinator.refreshIfStale(olderThan: 60)
         }
     }
 
+    private func updatePopoverSize() {
+        let screenHeight = statusItem.button?.window?.screen?.visibleFrame.height
+            ?? NSScreen.main?.visibleFrame.height
+            ?? 900
+        popover.contentSize = NSSize(
+            width: 430,
+            height: Self.preferredPopoverHeight(
+                providerCount: settings.registeredProviders.count,
+                screenHeight: screenHeight))
+    }
+
+    /// Keep small/medium provider sets fully expanded. Scrolling is only
+    /// required when the estimated natural card stack would exceed the usable
+    /// display height.
+    nonisolated static func preferredPopoverHeight(providerCount: Int, screenHeight: CGFloat) -> CGFloat {
+        let safeScreenHeight = max(320, screenHeight - 24)
+        if providerCount <= 0 {
+            return min(280, safeScreenHeight)
+        }
+        let chromeHeight: CGFloat = 118
+        let estimatedCardHeight: CGFloat = 190
+        let naturalHeight = chromeHeight + CGFloat(providerCount) * estimatedCardHeight
+        return min(max(320, naturalHeight), safeScreenHeight)
+    }
+
     private func render() {
         guard let button = statusItem.button else { return }
-        let provider = settings.selectedProvider
+        guard let provider = settings.selectedProvider else {
+            let image = renderEmptyImage()
+            statusItem.length = image.size.width + 8
+            button.image = image
+            button.toolTip = "AIUsage: no providers added\nClick: add a provider"
+            button.setAccessibilityLabel("AIUsage, no providers added. Click to add a provider")
+            return
+        }
+
         let snapshot = coordinator.snapshots[provider]
         let hasError = coordinator.errors[provider] != nil
         let title = displayTitle(provider: provider, snapshot: snapshot, hasError: hasError)
@@ -106,6 +148,19 @@ final class StatusItemController: NSObject {
             return "\(window.label) \(PercentFormatter.string(value)) percent \(metric)"
         }.joined(separator: ", ")
         return "\(provider.displayName): \(values)\(hasError ? ", showing stale data" : "")"
+    }
+
+    private func renderEmptyImage() -> NSImage {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let attributed = NSAttributedString(string: "AI +", attributes: attributes)
+        let size = attributed.size()
+        return NSImage(size: NSSize(width: ceil(size.width), height: 18), flipped: false) { rect in
+            attributed.draw(at: NSPoint(x: 0, y: (rect.height - size.height) / 2))
+            return true
+        }
     }
 
     private func renderImage(
