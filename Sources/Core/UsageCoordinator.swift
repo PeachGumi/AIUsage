@@ -28,17 +28,42 @@ final class UsageCoordinator: ObservableObject {
     @Published private(set) var refreshing: Set<ProviderID> = []
 
     private let providers: [ProviderID: any UsageProvider]
+    private var enabledProviderIDs: Set<ProviderID>
     private var generations: [ProviderID: Int] = [:]
     private var lastRefreshAllAt: Date?
     private var refreshAllInProgress = false
 
-    init(providers: [any UsageProvider]) {
+    /// `enabledProviders == nil` keeps the historical/test behavior of enabling
+    /// every supplied implementation. The app passes the user's explicit
+    /// registrations so a fresh install performs no provider requests.
+    init(providers: [any UsageProvider], enabledProviders: [ProviderID]? = nil) {
         self.providers = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
+        if let enabledProviders {
+            enabledProviderIDs = Set(enabledProviders).intersection(self.providers.keys)
+        } else {
+            enabledProviderIDs = Set(self.providers.keys)
+        }
     }
 
-    /// Starts every provider independently so a slow WebView/network provider
-    /// cannot delay the others. Re-entrant full refresh requests are coalesced;
-    /// individual provider refreshes are still allowed to supersede their own
+    /// Applies the user's current registration set. Removing a provider also
+    /// cancels in-flight work and drops its cached presentation state without
+    /// touching provider credentials/session storage.
+    func setEnabledProviders(_ ids: [ProviderID]) {
+        let next = Set(ids).intersection(providers.keys)
+        let removed = enabledProviderIDs.subtracting(next)
+        for id in removed {
+            generations[id, default: 0] += 1
+            providers[id]?.cancelActiveFetch()
+            snapshots.removeValue(forKey: id)
+            errors.removeValue(forKey: id)
+            refreshing.remove(id)
+        }
+        enabledProviderIDs = next
+    }
+
+    /// Starts every registered provider independently so a slow WebView/network
+    /// provider cannot delay the others. Re-entrant full refresh requests are
+    /// coalesced; individual provider refreshes can still supersede their own
     /// in-flight request through the generation mechanism below.
     func refreshAll() async {
         guard !refreshAllInProgress else { return }
@@ -48,7 +73,7 @@ final class UsageCoordinator: ObservableObject {
             lastRefreshAllAt = Date()
         }
 
-        let tasks = providers.keys.map { id in
+        let tasks = enabledProviderIDs.map { id in
             Task { @MainActor [weak self] in
                 await self?.refresh(id)
             }
@@ -59,7 +84,7 @@ final class UsageCoordinator: ObservableObject {
     }
 
     func refresh(_ id: ProviderID) async {
-        guard let provider = providers[id] else { return }
+        guard enabledProviderIDs.contains(id), let provider = providers[id] else { return }
         generations[id, default: 0] += 1
         let generation = generations[id]!
         refreshing.insert(id)
@@ -72,9 +97,9 @@ final class UsageCoordinator: ObservableObject {
         } catch {
             outcome = ProviderFetchOutcome(provider: id, result: .failure(ProviderFailure(message: error.localizedDescription)))
         }
-        // A newer refresh or a sign-out superseded this request: drop it so
-        // stale results never overwrite newer state.
-        guard generations[id] == generation else { return }
+        // A newer refresh, provider removal, or sign-out superseded this
+        // request: drop it so stale results never overwrite newer state.
+        guard generations[id] == generation, enabledProviderIDs.contains(id) else { return }
         apply(outcome)
         refreshing.remove(id)
     }
