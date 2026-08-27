@@ -13,6 +13,15 @@ final class OpenCodeGoParserTests: XCTestCase {
         XCTAssertEqual(result.snapshot.fetchedAt, Date(timeIntervalSince1970: 11))
     }
 
+    func testUsesLabelsWhenUpstreamReordersUsageCards() throws {
+        let json = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"Monthly","value":"33%"},{"label":"5-hour limit","value":"11%"},{"label":"Weekly usage","value":"22%"}],"promo":false,"other":false,"useBalance":false}"#
+
+        let result = try OpenCodeGoParser.parse(jsonText: json)
+
+        XCTAssertEqual(result.snapshot.windows.map(\.kind), [.fiveHour, .weekly, .monthly])
+        XCTAssertEqual(result.snapshot.windows.map(\.usedPercent), [11, 22, 33])
+    }
+
     func testRejectsMalformedAndOutOfRangePercentages() {
         let malformed = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"value":"0.2%"},{"value":"oops"},{"value":"32.1%"}]}"#
         let outOfRange = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"value":"0.2%"},{"value":"0.1%"},{"value":"101%"}]}"#
