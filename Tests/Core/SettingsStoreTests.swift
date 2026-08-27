@@ -39,6 +39,46 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(restored.metric, .used)
     }
 
+    func testLegacyProviderOrderMigratesOnlyWhenNewRegistrationKeyIsMissing() {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(["qwen", "codex", "openCodeGo"], forKey: "providerOrder")
+        defaults.set("codex", forKey: "menuBarProvider")
+
+        let store = SettingsStore(defaults: defaults)
+
+        XCTAssertEqual(store.registeredProviders, [.qwen, .codex, .openCodeGo])
+        XCTAssertEqual(store.selectedProvider, .codex)
+        XCTAssertEqual(defaults.stringArray(forKey: "registeredProviders"), ["qwen", "codex", "openCodeGo"])
+    }
+
+    func testLegacySelectedProviderMigratesWhenNoLegacyOrderExists() {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("qwen", forKey: "menuBarProvider")
+
+        let store = SettingsStore(defaults: defaults)
+
+        XCTAssertEqual(store.registeredProviders, [.qwen])
+        XCTAssertEqual(store.selectedProvider, .qwen)
+    }
+
+    func testExplicitEmptyRegistrationDoesNotResurrectLegacyProviders() {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set([], forKey: "registeredProviders")
+        defaults.set(["qwen", "codex", "openCodeGo"], forKey: "providerOrder")
+        defaults.set("codex", forKey: "menuBarProvider")
+
+        let store = SettingsStore(defaults: defaults)
+
+        XCTAssertTrue(store.registeredProviders.isEmpty)
+        XCTAssertNil(store.selectedProvider)
+    }
+
     func testDroppingEarlierProviderOnLaterCardPlacesItAtThatCardPosition() {
         let suite = "AIUsageTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
