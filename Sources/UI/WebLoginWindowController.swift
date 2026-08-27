@@ -106,7 +106,11 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
 }
 
 extension WebLoginWindowController: WKNavigationDelegate {
-    public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void)
+    {
         guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
         decisionHandler(navigationPolicy(for: url))
     }
