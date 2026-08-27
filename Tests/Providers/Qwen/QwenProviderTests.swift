@@ -26,6 +26,22 @@ final class QwenProviderTests: XCTestCase {
         XCTAssertThrowsError(try QwenProvider.parseSecToken(expired))
     }
 
+    func testExplicitCookieHeaderIsNeverAllowedOverHTTP() throws {
+        let cookie = try XCTUnwrap(HTTPCookie(properties: [
+            .domain: "home.qwencloud.com",
+            .path: "/",
+            .name: "session",
+            .value: "abc",
+        ]))
+
+        XCTAssertTrue(QwenCookieRepository.browserWouldSend(
+            cookie: cookie,
+            to: URL(string: "https://home.qwencloud.com/tool/user/info.json")!))
+        XCTAssertFalse(QwenCookieRepository.browserWouldSend(
+            cookie: cookie,
+            to: URL(string: "http://home.qwencloud.com/tool/user/info.json")!))
+    }
+
     func testLegacyFallbackOnlyAllowsExactHomeHTTPSHost() {
         XCTAssertTrue(QwenCookieRepository.isLegacyCompatible(
             URL(string: "https://home.qwencloud.com/tool/user/info.json")!))
