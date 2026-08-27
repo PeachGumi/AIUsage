@@ -11,6 +11,8 @@ struct AppActions {
     let quit: () -> Void
 }
 
+/// Main window content: one card per provider, all visible without scrolling.
+/// Clicking a card makes that provider the menu bar one; cards reorder by drag.
 struct DashboardView: View {
     @ObservedObject var coordinator: UsageCoordinator
     @ObservedObject var settings: SettingsStore
@@ -20,22 +22,30 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(ProviderID.allCases) { provider in
-                        ProviderCard(
-                            provider: provider,
-                            snapshot: coordinator.snapshots[provider],
-                            error: coordinator.errors[provider],
-                            refreshing: coordinator.refreshing.contains(provider),
-                            metric: settings.metric,
-                            actions: actions)
-                    }
+            // List gives native drag-to-reorder (onMove); scrollDisabled keeps
+            // every card visible without scrolling.
+            List {
+                ForEach(settings.providerOrder, id: \.self) { provider in
+                    ProviderCard(
+                        provider: provider,
+                        snapshot: coordinator.snapshots[provider],
+                        error: coordinator.errors[provider],
+                        refreshing: coordinator.refreshing.contains(provider),
+                        metric: settings.metric,
+                        isSelected: settings.selectedProvider == provider,
+                        actions: actions,
+                        select: { settings.selectedProvider = provider })
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .padding(.vertical, 6)
                 }
-                .padding(14)
+                .onMove { source, destination in
+                    settings.moveProvider(from: source, to: destination)
+                }
             }
-            .frame(maxHeight: 590)
-            Divider()
+            .listStyle(.plain)
+            .scrollDisabled(true)
+            .padding(.horizontal, 10)
             footer
         }
         .frame(width: 430)
@@ -46,7 +56,7 @@ struct DashboardView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("AI Usage").font(.headline)
-                Text("All providers at a glance").font(.caption).foregroundStyle(.secondary)
+                Text("Click a card to pin it to the menu bar").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button(action: actions.refreshAll) {
@@ -64,6 +74,8 @@ struct DashboardView: View {
             Button("Settings", systemImage: "gearshape", action: actions.showSettings)
                 .buttonStyle(.borderless)
             Spacer()
+            Text("Drag the grip to reorder").font(.caption2).foregroundStyle(.secondary)
+            Spacer()
             Button("Quit", action: actions.quit)
                 .buttonStyle(.borderless)
         }
@@ -77,9 +89,20 @@ private struct ProviderCard: View {
     let error: String?
     let refreshing: Bool
     let metric: UsageMetric
+    let isSelected: Bool
     let actions: AppActions
+    let select: () -> Void
 
     var body: some View {
+        card
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
+                isSelected ? ProviderVisuals.accent(provider).opacity(0.7) : Color.primary.opacity(0.08),
+                lineWidth: isSelected ? 1.5 : 1))
+    }
+
+    @ViewBuilder
+    private var card: some View {
         VStack(alignment: .leading, spacing: 11) {
             cardHeader
             if let snapshot {
@@ -101,9 +124,20 @@ private struct ProviderCard: View {
             cardActions
         }
         .padding(13)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.08)))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint("Sets this provider as the menu bar display")
+        .accessibilityAction(named: "Pin to menu bar", select)
+        // Card tap-through: the card background area (not its buttons) selects
+        // the provider. Buttons inside swallow taps first, so they still work.
+        .onTapGesture(perform: select)
+    }
+
+    private var accessibilitySummary: String {
+        let status = error != nil ? "needs attention" : snapshot == nil ? "loading" : "available"
+        return "\(provider.displayName), \(status)\(isSelected ? ", shown in menu bar" : "")"
     }
 
     private var cardHeader: some View {
@@ -116,6 +150,12 @@ private struct ProviderCard: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(provider.displayName).font(.subheadline.weight(.semibold))
                 if let plan = snapshot?.planName { Text(plan).font(.caption2).foregroundStyle(.secondary) }
+            }
+            if isSelected {
+                Label("Menu bar", systemImage: "menubar.rectangle")
+                    .font(.caption2)
+                    .foregroundStyle(ProviderVisuals.accent(provider))
+                    .labelStyle(.titleAndIcon)
             }
             Spacer()
             if refreshing { ProgressView().controlSize(.small) }
