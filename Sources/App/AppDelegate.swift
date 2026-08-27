@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await removeWebsiteData(matching: ["qwencloud.com", "qianwenai.com"])
             coordinator.markSignedOut(.qwen, message: "Qwen Cloud login is required.")
         case .openCodeGo:
+            workspaceStore.clear()
             await removeWebsiteData(matching: ["opencode.ai"])
             coordinator.markSignedOut(.openCodeGo, message: "OpenCode login is required.")
         case .codex:
@@ -120,6 +121,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    nonisolated static func websiteDataRecordName(_ recordName: String, matches domain: String) -> Bool {
+        let name = recordName.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        let domain = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !name.isEmpty, !domain.isEmpty else { return false }
+        return name == domain || name.hasSuffix(".\(domain)")
+    }
+
     private func removeWebsiteData(matching domains: [String]) async {
         let store = WKWebsiteDataStore.default()
         let types = WKWebsiteDataStore.allWebsiteDataTypes()
@@ -128,9 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let matched = records.filter { record in
             domains.contains { domain in
-                let name = record.displayName.lowercased()
-                return name == domain || name.hasSuffix(".\(domain)") || name == domain ||
-                    name.hasSuffix(domain) && name.contains(domain)
+                Self.websiteDataRecordName(record.displayName, matches: domain)
             }
         }
         await withCheckedContinuation { continuation in
