@@ -3,46 +3,75 @@ import XCTest
 
 @MainActor
 final class SettingsStoreTests: XCTestCase {
-    func testDefaultsAndPersistsMenuBarSelection() {
+    func testFreshInstallStartsWithNoRegisteredProviders() {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = SettingsStore(defaults: defaults)
+
+        XCTAssertTrue(store.registeredProviders.isEmpty)
+        XCTAssertNil(store.selectedProvider)
+        XCTAssertEqual(store.metric, .remaining)
+        XCTAssertEqual(Set(store.addableProviders), Set(ProviderID.implemented))
+    }
+
+    func testAddingProvidersSelectsFirstAndPersistsRegistrationOrder() {
         let suite = "AIUsageTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let first = SettingsStore(defaults: defaults)
-        XCTAssertEqual(first.selectedProvider, .codex)
-        XCTAssertEqual(first.metric, .remaining)
-
-        first.selectedProvider = .qwen
+        first.addProvider(.qwen)
+        first.addProvider(.codex)
         first.metric = .used
 
+        XCTAssertEqual(first.registeredProviders, [.qwen, .codex])
+        XCTAssertEqual(first.selectedProvider, .qwen)
+        XCTAssertFalse(first.addableProviders.contains(.qwen))
+
+        first.moveProvider(from: IndexSet(integer: 1), to: 0)
+        XCTAssertEqual(first.registeredProviders, [.codex, .qwen])
+
         let restored = SettingsStore(defaults: defaults)
+        XCTAssertEqual(restored.registeredProviders, [.codex, .qwen])
         XCTAssertEqual(restored.selectedProvider, .qwen)
         XCTAssertEqual(restored.metric, .used)
     }
 
-    func testProviderOrderDefaultsToEnumOrderAndPersistsAcrossInstances() {
+    func testRemovingSelectedProviderFallsBackThenBecomesEmpty() {
         let suite = "AIUsageTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let store = SettingsStore(defaults: defaults)
-        XCTAssertEqual(store.providerOrder, ProviderID.allCases)
+        store.addProvider(.openCodeGo)
+        store.addProvider(.codex)
+        store.selectedProvider = .codex
 
-        store.moveProvider(from: IndexSet(integer: 2), to: 0)
-        XCTAssertEqual(store.providerOrder.first, ProviderID.allCases[2])
+        store.removeProvider(.codex)
+        XCTAssertEqual(store.registeredProviders, [.openCodeGo])
+        XCTAssertEqual(store.selectedProvider, .openCodeGo)
 
-        let restored = SettingsStore(defaults: defaults)
-        XCTAssertEqual(restored.providerOrder, store.providerOrder)
+        store.removeProvider(.openCodeGo)
+        XCTAssertTrue(store.registeredProviders.isEmpty)
+        XCTAssertNil(store.selectedProvider)
     }
 
-    func testProviderOrderSanitizesInvalidAndMissingEntries() {
+    func testRegistrationSanitizesInvalidAndDuplicateEntries() {
         let suite = "AIUsageTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(["qwen", "bogus", "qwen"], forKey: "providerOrder")
+        defaults.set(["qwen", "bogus", "qwen"], forKey: "registeredProviders")
+        defaults.set("codex", forKey: "menuBarProvider")
 
         let store = SettingsStore(defaults: defaults)
-        // Invalid entries dropped, duplicates removed, missing providers appended.
-        XCTAssertEqual(store.providerOrder, [.qwen, .openCodeGo, .codex])
+
+        XCTAssertEqual(store.registeredProviders, [.qwen])
+        XCTAssertEqual(store.selectedProvider, .qwen)
+    }
+
+    func testRequiredProvidersAreImplemented() {
+        XCTAssertEqual(Set(ProviderID.implemented), Set([.openCodeGo, .codex, .qwen]))
     }
 }
