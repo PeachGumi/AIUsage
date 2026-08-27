@@ -69,10 +69,15 @@ enum CodexUsageParser {
     }
 }
 
-enum CodexUsageError: LocalizedError {
+enum CodexUsageError: LocalizedError, ProviderAuthenticationError {
     case invalidResponse
     case unauthorized
     case http(Int)
+
+    var requiresAuthentication: Bool {
+        if case .unauthorized = self { return true }
+        return false
+    }
 
     var errorDescription: String? {
         switch self {
