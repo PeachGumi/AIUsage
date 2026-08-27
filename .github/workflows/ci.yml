@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project AIUsage.xcodeproj \
+            -scheme AIUsage \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Release build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project AIUsage.xcodeproj \
+            -scheme AIUsage \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO
