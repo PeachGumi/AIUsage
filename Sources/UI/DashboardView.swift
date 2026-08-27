@@ -1,5 +1,18 @@
 import SwiftUI
 
+enum ProviderDragLayout {
+    static func target(
+        atY y: CGFloat,
+        order: [ProviderID],
+        frames: [ProviderID: CGRect],
+        excluding source: ProviderID
+    ) -> ProviderID? {
+        order.first { provider in
+            provider != source && frames[provider]?.contains(CGPoint(x: frames[provider]?.midX ?? 0, y: y)) == true
+        }
+    }
+}
+
 @MainActor
 struct AppActions {
     let addProvider: (ProviderID) -> Void
@@ -20,6 +33,10 @@ struct DashboardView: View {
     @ObservedObject var settings: SettingsStore
     let actions: AppActions
     @State private var draggedProvider: ProviderID?
+    @State private var hoveredProvider: ProviderID?
+    @State private var dragTranslation: CGSize = .zero
+    @State private var dragStartFrame: CGRect?
+    @State private var cardFrames: [ProviderID: CGRect] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,32 +54,84 @@ struct DashboardView: View {
     }
 
     private var providerList: some View {
-        VStack(spacing: 12) {
-            ForEach(settings.registeredProviders, id: \.self) { provider in
-                ProviderCard(
-                    provider: provider,
-                    snapshot: coordinator.snapshots[provider],
-                    error: coordinator.errors[provider],
-                    refreshing: coordinator.refreshing.contains(provider),
-                    metric: settings.metric,
-                    isSelected: settings.selectedProvider == provider,
-                    showsReorderHandle: settings.registeredProviders.count > 1,
-                    actions: actions,
-                    select: { settings.selectedProvider = provider },
-                    beginDrag: {
-                        draggedProvider = provider
-                        return NSItemProvider(object: provider.rawValue as NSString)
-                    },
-                    draggedProvider: $draggedProvider,
-                    moveOnHover: { source, target in
-                        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82)) {
-                            settings.moveProvider(source, onto: target)
-                        }
-                    })
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 12) {
+                ForEach(settings.registeredProviders, id: \.self) { provider in
+                    providerCard(provider, floating: false)
+                        .opacity(draggedProvider == provider ? 0.12 : 1)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ProviderCardFrameKey.self,
+                                    value: [provider: proxy.frame(in: .named("provider-list"))])
+                            }
+                        )
+                }
             }
+
+            if let provider = draggedProvider, let start = dragStartFrame {
+                providerCard(provider, floating: true)
+                    .frame(width: start.width, height: start.height)
+                    .position(
+                        x: start.midX + dragTranslation.width,
+                        y: start.midY + dragTranslation.height)
+                    .scaleEffect(1.025)
+                    .shadow(color: .black.opacity(0.30), radius: 14, y: 8)
+                    .zIndex(100)
+                    .allowsHitTesting(false)
+            }
+        }
+        .coordinateSpace(name: "provider-list")
+        .onPreferenceChange(ProviderCardFrameKey.self) { frames in
+            Task { @MainActor in cardFrames = frames }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private func providerCard(_ provider: ProviderID, floating: Bool) -> some View {
+        ProviderCard(
+            provider: provider,
+            snapshot: coordinator.snapshots[provider],
+            error: coordinator.errors[provider],
+            refreshing: coordinator.refreshing.contains(provider),
+            metric: settings.metric,
+            isSelected: settings.selectedProvider == provider,
+            showsReorderHandle: settings.registeredProviders.count > 1,
+            isDropTarget: hoveredProvider == provider,
+            isFloating: floating,
+            actions: actions,
+            select: { settings.selectedProvider = provider },
+            dragChanged: { value in handleDragChanged(provider: provider, value: value) },
+            dragEnded: { handleDragEnded() })
+    }
+
+    private func handleDragChanged(provider: ProviderID, value: DragGesture.Value) {
+        if draggedProvider == nil {
+            draggedProvider = provider
+            dragStartFrame = cardFrames[provider]
+        }
+        dragTranslation = value.translation
+
+        let target = ProviderDragLayout.target(
+            atY: value.location.y,
+            order: settings.registeredProviders,
+            frames: cardFrames,
+            excluding: provider)
+        hoveredProvider = target
+        guard let target else { return }
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82)) {
+            settings.moveProvider(provider, onto: target)
+        }
+    }
+
+    private func handleDragEnded() {
+        withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.84)) {
+            draggedProvider = nil
+            hoveredProvider = nil
+            dragTranslation = .zero
+            dragStartFrame = nil
+        }
     }
 
     private var header: some View {
@@ -141,6 +210,14 @@ struct DashboardView: View {
     }
 }
 
+private struct ProviderCardFrameKey: PreferenceKey {
+    static let defaultValue: [ProviderID: CGRect] = [:]
+
+    static func reduce(value: inout [ProviderID: CGRect], nextValue: () -> [ProviderID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
 private struct ProviderCard: View {
     let provider: ProviderID
     let snapshot: ProviderSnapshot?
@@ -149,12 +226,12 @@ private struct ProviderCard: View {
     let metric: UsageMetric
     let isSelected: Bool
     let showsReorderHandle: Bool
+    let isDropTarget: Bool
+    let isFloating: Bool
     let actions: AppActions
     let select: () -> Void
-    let beginDrag: () -> NSItemProvider
-    @Binding var draggedProvider: ProviderID?
-    let moveOnHover: (ProviderID, ProviderID) -> Void
-    @State private var isDropTarget = false
+    let dragChanged: (DragGesture.Value) -> Void
+    let dragEnded: () -> Void
 
     var body: some View {
         card
@@ -162,13 +239,6 @@ private struct ProviderCard: View {
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
                 isDropTarget ? Color.accentColor : isSelected ? ProviderVisuals.accent(provider).opacity(0.7) : Color.primary.opacity(0.08),
                 lineWidth: isDropTarget || isSelected ? 1.5 : 1))
-            .onDrop(
-                of: [.plainText],
-                delegate: ProviderCardDropDelegate(
-                    target: provider,
-                    draggedProvider: $draggedProvider,
-                    isTargeted: $isDropTarget,
-                    moveOnHover: moveOnHover))
     }
 
     @ViewBuilder
@@ -211,16 +281,23 @@ private struct ProviderCard: View {
     private var cardHeader: some View {
         HStack(spacing: 9) {
             if showsReorderHandle {
-                Image(systemName: "line.3.horizontal")
+                let handle = Image(systemName: "line.3.horizontal")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(width: 18, height: 24)
                     .contentShape(Rectangle())
-                    .onDrag(beginDrag) {
-                        dragPreview
-                    }
-                    .help("Drag to reorder")
-                    .accessibilityLabel("Drag \(provider.displayName) to reorder")
+
+                if isFloating {
+                    handle
+                } else {
+                    handle
+                        .gesture(
+                            DragGesture(minimumDistance: 2, coordinateSpace: .named("provider-list"))
+                                .onChanged(dragChanged)
+                                .onEnded { _ in dragEnded() })
+                        .help("Drag to reorder")
+                        .accessibilityLabel("Drag \(provider.displayName) to reorder")
+                }
             }
             Text(provider.shortName)
                 .font(.system(.caption, design: .rounded, weight: .bold))
@@ -241,53 +318,6 @@ private struct ProviderCard: View {
             if refreshing { ProgressView().controlSize(.small) }
             statusDot
         }
-    }
-
-    private var dragPreview: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            HStack(spacing: 9) {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 24)
-                Text(provider.shortName)
-                    .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 24)
-                    .background(ProviderVisuals.accent(provider), in: RoundedRectangle(cornerRadius: 6))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(provider.displayName).font(.subheadline.weight(.semibold))
-                    if let plan = snapshot?.planName {
-                        Text(plan).font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if isSelected {
-                    Label("Menu bar", systemImage: "menubar.rectangle")
-                        .font(.caption2)
-                        .foregroundStyle(ProviderVisuals.accent(provider))
-                }
-                statusDot
-            }
-            if let snapshot {
-                ForEach(snapshot.windows) { window in
-                    UsageWindowRow(window: window, metric: metric)
-                }
-            } else if let error {
-                errorView(error)
-            } else {
-                placeholder
-            }
-        }
-        .frame(width: 376, alignment: .leading)
-        .padding(13)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(ProviderVisuals.accent(provider).opacity(0.85), lineWidth: 2)
-        )
-        .shadow(color: .black.opacity(0.28), radius: 12, y: 7)
-        .opacity(0.96)
     }
 
     private var statusDot: some View {
@@ -329,37 +359,6 @@ private struct ProviderCard: View {
                 .help("Remove from AIUsage without signing out")
         }
         .font(.caption)
-    }
-}
-
-private struct ProviderCardDropDelegate: DropDelegate {
-    let target: ProviderID
-    @Binding var draggedProvider: ProviderID?
-    @Binding var isTargeted: Bool
-    let moveOnHover: (ProviderID, ProviderID) -> Void
-
-    func validateDrop(info: DropInfo) -> Bool {
-        draggedProvider != nil
-    }
-
-    func dropEntered(info: DropInfo) {
-        isTargeted = true
-        guard let source = draggedProvider, source != target else { return }
-        moveOnHover(source, target)
-    }
-
-    func dropExited(info: DropInfo) {
-        isTargeted = false
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        isTargeted = false
-        draggedProvider = nil
-        return true
     }
 }
 

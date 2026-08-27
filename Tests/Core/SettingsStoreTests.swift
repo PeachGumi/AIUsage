@@ -83,6 +83,23 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.registeredProviders, [.qwen, .codex, .openCodeGo])
     }
 
+    func testDragLayoutFindsHoveredProviderAndExcludesSource() {
+        let frames: [ProviderID: CGRect] = [
+            .openCodeGo: CGRect(x: 0, y: 0, width: 400, height: 100),
+            .qwen: CGRect(x: 0, y: 112, width: 400, height: 100),
+            .codex: CGRect(x: 0, y: 224, width: 400, height: 100)
+        ]
+        let order: [ProviderID] = [.openCodeGo, .qwen, .codex]
+
+        XCTAssertEqual(
+            ProviderDragLayout.target(atY: 150, order: order, frames: frames, excluding: .openCodeGo),
+            .qwen)
+        XCTAssertNil(
+            ProviderDragLayout.target(atY: 50, order: order, frames: frames, excluding: .openCodeGo))
+        XCTAssertNil(
+            ProviderDragLayout.target(atY: 400, order: order, frames: frames, excluding: .openCodeGo))
+    }
+
     func testRemovingSelectedProviderFallsBackThenBecomesEmpty() {
         let suite = "AIUsageTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
