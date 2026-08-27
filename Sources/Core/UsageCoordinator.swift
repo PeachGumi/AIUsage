@@ -30,16 +30,32 @@ final class UsageCoordinator: ObservableObject {
     private let providers: [ProviderID: any UsageProvider]
     private var generations: [ProviderID: Int] = [:]
     private var lastRefreshAllAt: Date?
+    private var refreshAllInProgress = false
 
     init(providers: [any UsageProvider]) {
         self.providers = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
     }
 
+    /// Starts every provider independently so a slow WebView/network provider
+    /// cannot delay the others. Re-entrant full refresh requests are coalesced;
+    /// individual provider refreshes are still allowed to supersede their own
+    /// in-flight request through the generation mechanism below.
     func refreshAll() async {
-        for id in providers.keys {
-            await refresh(id)
+        guard !refreshAllInProgress else { return }
+        refreshAllInProgress = true
+        defer {
+            refreshAllInProgress = false
+            lastRefreshAllAt = Date()
         }
-        lastRefreshAllAt = Date()
+
+        let tasks = providers.keys.map { id in
+            Task { @MainActor [weak self] in
+                await self?.refresh(id)
+            }
+        }
+        for task in tasks {
+            await task.value
+        }
     }
 
     func refresh(_ id: ProviderID) async {
@@ -76,6 +92,7 @@ final class UsageCoordinator: ObservableObject {
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
+        guard !refreshAllInProgress else { return }
         if let last = lastRefreshAllAt, Date().timeIntervalSince(last) < interval { return }
         await refreshAll()
     }
