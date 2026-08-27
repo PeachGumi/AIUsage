@@ -2,14 +2,22 @@
 
 AIUsageはローカルで動作するメニューバーアプリです。分析SDK、広告SDK、クラッシュ収集サービス、独自サーバーは使用しません。
 
+AIUsageは初回起動時にProviderを自動登録しません。ユーザーがPopoverの **+** から明示的に追加したProviderだけが、起動時・定期更新・手動更新のusage取得対象になります。
+
 ## ローカルで扱う情報
 
 - OpenCode Go: WKWebViewのログインセッションとworkspace ID
 - Qwen Cloud: WKWebView Cookie、または旧QwenUsageの移行用Cookieヘッダー
 - OpenAI Codex: `~/.codex/auth.json`内の既存OAuthアクセストークンと任意のアカウントID
-- 表示設定: 選択Providerと残量／使用量の選択
+- 表示設定: 登録Provider、選択Provider、並び順、残量／使用量の選択
 
 認証情報はProviderの公式Webサイトまたはusage endpointへの通信にだけ使用します。AIUsageの独自サーバーへ送信されることはありません。
+
+## ProviderのRemoveとSign out
+
+**Remove** は、そのProviderをAIUsageの表示とusage更新対象から外します。RemoveだけではWebKitログイン情報、OpenCode workspace ID、Codex CLIの認証ファイルなどを削除しません。再追加したときに既存セッションを利用できるよう、登録状態と認証状態は分離しています。
+
+認証状態まで削除したい場合は、対応Providerの **Sign out** を使用してください。Codexの認証ファイルはAIUsageが変更しないため、Codex CLI側でログアウトします。
 
 ## 保存
 
@@ -26,6 +34,8 @@ OAuthトークン、Cookie、アカウントID、workspace ID、APIレスポン�
 
 ## 通信
 
+- 登録されていないProviderへusage取得通信を開始しません。
+- ProviderをRemoveするとin-flight取得を無効化し、古い結果が画面へ復活しないようにします。
 - CodexのBearer付きリクエストはHTTPリダイレクトを拒否します。
 - QwenのCookie付きリクエストもHTTPリダイレクトを拒否します。
 - URLSessionはephemeral設定を使い、共有Cookie・資格情報・URLキャッシュを無効化します。
