@@ -32,9 +32,13 @@ private struct SettingsView: View {
     var body: some View {
         Form {
             Section("Menu Bar") {
-                Picker("Displayed service", selection: $settings.selectedProvider) {
-                    ForEach(ProviderID.allCases) { provider in
-                        Text(provider.displayName).tag(provider)
+                if settings.registeredProviders.isEmpty {
+                    LabeledContent("Displayed service", value: "No providers added")
+                } else {
+                    Picker("Displayed service", selection: $settings.selectedProvider) {
+                        ForEach(settings.registeredProviders) { provider in
+                            Text(provider.displayName).tag(Optional(provider))
+                        }
                     }
                 }
                 Picker("Displayed value", selection: $settings.metric) {
@@ -44,7 +48,7 @@ private struct SettingsView: View {
             }
             Section("Updates") {
                 LabeledContent("Refresh interval", value: "5 minutes")
-                Text("All services refresh in the background. The selection above only changes the menu bar display.")
+                Text("Only providers you add from the menu-bar popover are refreshed in the background.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
