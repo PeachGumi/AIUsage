@@ -1,15 +1,26 @@
 import SwiftUI
 
 enum ProviderDragLayout {
-    static func target(
-        atY y: CGFloat,
-        order: [ProviderID],
-        frames: [ProviderID: CGRect],
-        excluding source: ProviderID
-    ) -> ProviderID? {
-        order.first { provider in
-            provider != source && frames[provider]?.contains(CGPoint(x: frames[provider]?.midX ?? 0, y: y)) == true
+    static func nextIndex(
+        pointerY: CGFloat,
+        currentIndex: Int,
+        slots: [CGRect],
+        hysteresis: CGFloat
+    ) -> Int {
+        guard slots.indices.contains(currentIndex) else { return currentIndex }
+        if currentIndex + 1 < slots.count,
+           pointerY > slots[currentIndex + 1].midY + hysteresis {
+            return currentIndex + 1
         }
+        if currentIndex > 0,
+           pointerY < slots[currentIndex - 1].midY - hysteresis {
+            return currentIndex - 1
+        }
+        return currentIndex
+    }
+
+    static func verticalTranslation(_ translation: CGSize) -> CGSize {
+        CGSize(width: 0, height: translation.height)
     }
 }
 
@@ -36,6 +47,8 @@ struct DashboardView: View {
     @State private var hoveredProvider: ProviderID?
     @State private var dragTranslation: CGSize = .zero
     @State private var dragStartFrame: CGRect?
+    @State private var dragSlotFrames: [CGRect] = []
+    @State private var dragCurrentIndex: Int?
     @State private var cardFrames: [ProviderID: CGRect] = [:]
 
     var body: some View {
@@ -73,7 +86,7 @@ struct DashboardView: View {
                 providerCard(provider, floating: true)
                     .frame(width: start.width, height: start.height)
                     .position(
-                        x: start.midX + dragTranslation.width,
+                        x: start.midX,
                         y: start.midY + dragTranslation.height)
                     .scaleEffect(1.025)
                     .shadow(color: .black.opacity(0.30), radius: 14, y: 8)
@@ -108,29 +121,46 @@ struct DashboardView: View {
 
     private func handleDragChanged(provider: ProviderID, value: DragGesture.Value) {
         if draggedProvider == nil {
+            let order = settings.registeredProviders
+            let slots = order.compactMap { cardFrames[$0] }
+            guard slots.count == order.count,
+                  let index = order.firstIndex(of: provider),
+                  let startFrame = cardFrames[provider] else { return }
             draggedProvider = provider
-            dragStartFrame = cardFrames[provider]
+            dragStartFrame = startFrame
+            dragSlotFrames = slots
+            dragCurrentIndex = index
         }
-        dragTranslation = value.translation
+        dragTranslation = ProviderDragLayout.verticalTranslation(value.translation)
 
-        let target = ProviderDragLayout.target(
-            atY: value.location.y,
-            order: settings.registeredProviders,
-            frames: cardFrames,
-            excluding: provider)
+        guard let currentIndex = dragCurrentIndex else { return }
+        let nextIndex = ProviderDragLayout.nextIndex(
+            pointerY: value.location.y,
+            currentIndex: currentIndex,
+            slots: dragSlotFrames,
+            hysteresis: 12)
+        guard nextIndex != currentIndex,
+              settings.registeredProviders.indices.contains(nextIndex) else {
+            hoveredProvider = nil
+            return
+        }
+
+        let target = settings.registeredProviders[nextIndex]
         hoveredProvider = target
-        guard let target else { return }
-        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82)) {
+        dragCurrentIndex = nextIndex
+        withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
             settings.moveProvider(provider, onto: target)
         }
     }
 
     private func handleDragEnded() {
-        withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.84)) {
+        withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
             draggedProvider = nil
             hoveredProvider = nil
             dragTranslation = .zero
             dragStartFrame = nil
+            dragSlotFrames = []
+            dragCurrentIndex = nil
         }
     }
 
