@@ -2,19 +2,31 @@ import XCTest
 @testable import AIUsage
 
 final class LoginSuccessRulesTests: XCTestCase {
-    func testOpenCodeRequiresWorkspacePageOnExpectedHost() {
+    func testOpenCodeRequiresConsoleOrWorkspacePageOnExpectedHost() {
         XCTAssertTrue(LoginSuccessRules.isSuccess(
             provider: .openCodeGo,
             url: URL(string: "https://opencode.ai/workspace/wrk_example/go")!))
+        XCTAssertTrue(LoginSuccessRules.isSuccess(
+            provider: .openCodeGo,
+            url: URL(string: "https://opencode.ai/console/")!))
+        XCTAssertFalse(LoginSuccessRules.isSuccess(
+            provider: .openCodeGo,
+            url: URL(string: "https://opencode.ai/")!))
         XCTAssertFalse(LoginSuccessRules.isSuccess(
             provider: .openCodeGo,
             url: URL(string: "https://auth.opencode.ai/auth")!))
+        XCTAssertFalse(LoginSuccessRules.isSuccess(
+            provider: .openCodeGo,
+            url: URL(string: "http://opencode.ai/console/")!))
     }
 
-    func testQwenRejectsLoginAndPassportPages() {
+    func testQwenRequiresBillingPageOnExpectedHost() {
         XCTAssertTrue(LoginSuccessRules.isSuccess(
             provider: .qwen,
             url: URL(string: "https://home.qwencloud.com/billing/subscription/token-plan-individual")!))
+        XCTAssertFalse(LoginSuccessRules.isSuccess(
+            provider: .qwen,
+            url: URL(string: "https://home.qwencloud.com/")!))
         XCTAssertFalse(LoginSuccessRules.isSuccess(
             provider: .qwen,
             url: URL(string: "https://home.qwencloud.com/login")!))
