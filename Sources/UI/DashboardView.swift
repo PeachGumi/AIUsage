@@ -46,6 +46,7 @@ struct AppActions {
 struct DashboardView: View {
     @ObservedObject var coordinator: UsageCoordinator
     @ObservedObject var settings: SettingsStore
+    @ObservedObject var layoutMetrics: PopoverLayoutMetrics
     let actions: AppActions
     @State private var draggedProvider: ProviderID?
     @State private var hoveredProvider: ProviderID?
@@ -68,8 +69,18 @@ struct DashboardView: View {
                 // cards, provides the required overflow behavior.
                 ScrollView(.vertical) {
                     providerList
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ProviderListHeightKey.self,
+                                    value: proxy.size.height)
+                            }
+                        )
                 }
                 .scrollIndicators(.automatic)
+                .onPreferenceChange(ProviderListHeightKey.self) { height in
+                    Task { @MainActor in layoutMetrics.providerListHeight = height }
+                }
             }
             footer
         }
@@ -250,6 +261,14 @@ struct DashboardView: View {
                 .buttonStyle(.borderless)
         }
         .padding(12)
+    }
+}
+
+private struct ProviderListHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

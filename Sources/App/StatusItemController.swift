@@ -3,11 +3,17 @@ import Combine
 import SwiftUI
 
 @MainActor
+final class PopoverLayoutMetrics: ObservableObject {
+    @Published var providerListHeight: CGFloat = 0
+}
+
+@MainActor
 final class StatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let coordinator: UsageCoordinator
     private let settings: SettingsStore
+    private let layoutMetrics = PopoverLayoutMetrics()
     private var cancellables: Set<AnyCancellable> = []
 
     init(coordinator: UsageCoordinator, settings: SettingsStore, actions: AppActions) {
@@ -15,7 +21,11 @@ final class StatusItemController: NSObject {
         self.settings = settings
         super.init()
 
-        let dashboard = DashboardView(coordinator: coordinator, settings: settings, actions: actions)
+        let dashboard = DashboardView(
+            coordinator: coordinator,
+            settings: settings,
+            layoutMetrics: layoutMetrics,
+            actions: actions)
         popover.contentViewController = NSHostingController(rootView: dashboard)
         popover.behavior = .transient
         popover.animates = true
@@ -62,6 +72,12 @@ final class StatusItemController: NSObject {
                 self?.render()
             }
             .store(in: &cancellables)
+
+        layoutMetrics.$providerListHeight
+            .removeDuplicates { abs($0 - $1) < 0.5 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updatePopoverSize() }
+            .store(in: &cancellables)
     }
 
     /// A menu bar click toggles the dashboard directly under the status item.
@@ -93,20 +109,29 @@ final class StatusItemController: NSObject {
             width: 430,
             height: Self.preferredPopoverHeight(
                 providerCount: settings.registeredProviders.count,
+                measuredProviderListHeight: layoutMetrics.providerListHeight,
                 screenHeight: screenHeight))
     }
 
-    /// Keep small/medium provider sets fully expanded. Scrolling is only
-    /// required when the estimated natural card stack would exceed the usable
-    /// display height.
-    nonisolated static func preferredPopoverHeight(providerCount: Int, screenHeight: CGFloat) -> CGFloat {
+    /// Uses the actual SwiftUI card-stack height whenever available. The
+    /// conservative fallback prevents the first frame from clipping before
+    /// GeometryReader reports its measurement. Scrolling begins only at the
+    /// usable display-height boundary.
+    nonisolated static func preferredPopoverHeight(
+        providerCount: Int,
+        measuredProviderListHeight: CGFloat,
+        screenHeight: CGFloat
+    ) -> CGFloat {
         let safeScreenHeight = max(320, screenHeight - 24)
         if providerCount <= 0 {
             return min(280, safeScreenHeight)
         }
         let chromeHeight: CGFloat = 118
-        let estimatedCardHeight: CGFloat = 190
-        let naturalHeight = chromeHeight + CGFloat(providerCount) * estimatedCardHeight
+        let fallbackCardHeight: CGFloat = 330
+        let providerListHeight = measuredProviderListHeight > 0
+            ? measuredProviderListHeight
+            : CGFloat(providerCount) * fallbackCardHeight
+        let naturalHeight = chromeHeight + providerListHeight
         return min(max(320, naturalHeight), safeScreenHeight)
     }
 
