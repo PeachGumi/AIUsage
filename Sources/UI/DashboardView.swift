@@ -217,9 +217,7 @@ private struct ProviderCard: View {
                     .frame(width: 18, height: 24)
                     .contentShape(Rectangle())
                     .onDrag(beginDrag) {
-                        Image(systemName: "line.3.horizontal")
-                            .padding(8)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+                        dragPreview
                     }
                     .help("Drag to reorder")
                     .accessibilityLabel("Drag \(provider.displayName) to reorder")
@@ -243,6 +241,53 @@ private struct ProviderCard: View {
             if refreshing { ProgressView().controlSize(.small) }
             statusDot
         }
+    }
+
+    private var dragPreview: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 9) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 24)
+                Text(provider.shortName)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 24)
+                    .background(ProviderVisuals.accent(provider), in: RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(provider.displayName).font(.subheadline.weight(.semibold))
+                    if let plan = snapshot?.planName {
+                        Text(plan).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if isSelected {
+                    Label("Menu bar", systemImage: "menubar.rectangle")
+                        .font(.caption2)
+                        .foregroundStyle(ProviderVisuals.accent(provider))
+                }
+                statusDot
+            }
+            if let snapshot {
+                ForEach(snapshot.windows) { window in
+                    UsageWindowRow(window: window, metric: metric)
+                }
+            } else if let error {
+                errorView(error)
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: 376, alignment: .leading)
+        .padding(13)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(ProviderVisuals.accent(provider).opacity(0.85), lineWidth: 2)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 12, y: 7)
+        .opacity(0.96)
     }
 
     private var statusDot: some View {
