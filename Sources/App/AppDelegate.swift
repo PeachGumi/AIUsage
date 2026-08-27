@@ -12,7 +12,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try await qwenCookies.header(for: url)
     })
     private lazy var codexProvider = CodexProvider()
-    private lazy var coordinator = UsageCoordinator(providers: [codexProvider, qwenProvider, openCodeProvider])
+
+    /// Concrete provider implementations live in one registry. The UI catalog
+    /// is ProviderID.allCases, while SettingsStore decides which of these the
+    /// user has explicitly registered. Future providers should plug in here
+    /// without requiring dashboard-specific branching.
+    private lazy var providerImplementations: [any UsageProvider] = [
+        codexProvider,
+        qwenProvider,
+        openCodeProvider,
+    ]
+    private lazy var coordinator = UsageCoordinator(
+        providers: providerImplementations,
+        enabledProviders: settings.registeredProviders)
     private lazy var settingsController = SettingsWindowController(settings: settings)
     private var statusController: StatusItemController?
     private var loginControllers: [ProviderID: WebLoginWindowController] = [:]
@@ -43,11 +55,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
-        openCodeProvider.cancelActiveFetch()
+        for provider in providerImplementations {
+            provider.cancelActiveFetch()
+        }
     }
 
     private func makeActions() -> AppActions {
         AppActions(
+            addProvider: { [weak self] provider in self?.addProvider(provider) },
+            removeProvider: { [weak self] provider in self?.removeProvider(provider) },
             refreshAll: { [weak self] in Task { await self?.coordinator.refreshAll() } },
             refresh: { [weak self] provider in Task { await self?.coordinator.refresh(provider) } },
             login: { [weak self] provider in self?.showLogin(provider) },
@@ -55,6 +71,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openDashboard: { [weak self] provider in self?.openDashboard(provider) },
             showSettings: { [weak self] in self?.settingsController.show() },
             quit: { NSApp.terminate(nil) })
+    }
+
+    private func addProvider(_ provider: ProviderID) {
+        settings.addProvider(provider)
+        coordinator.setEnabledProviders(settings.registeredProviders)
+        Task { await coordinator.refresh(provider) }
+    }
+
+    private func removeProvider(_ provider: ProviderID) {
+        settings.removeProvider(provider)
+        coordinator.setEnabledProviders(settings.registeredProviders)
     }
 
     private func showLogin(_ provider: ProviderID) {
