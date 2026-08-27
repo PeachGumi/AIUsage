@@ -67,6 +67,22 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.registeredProviders, [.codex, .openCodeGo, .qwen])
     }
 
+    func testSuccessiveDragHoverMovesFollowProviderIdentity() {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        store.addProvider(.openCodeGo)
+        store.addProvider(.qwen)
+        store.addProvider(.codex)
+
+        store.moveProvider(.openCodeGo, onto: .qwen)
+        XCTAssertEqual(store.registeredProviders, [.qwen, .openCodeGo, .codex])
+
+        store.moveProvider(.openCodeGo, onto: .codex)
+        XCTAssertEqual(store.registeredProviders, [.qwen, .codex, .openCodeGo])
+    }
+
     func testRemovingSelectedProviderFallsBackThenBecomesEmpty() {
         let suite = "AIUsageTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

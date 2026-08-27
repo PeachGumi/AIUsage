@@ -73,6 +73,13 @@ final class SettingsStore: ObservableObject {
         moveProvider(from: IndexSet(integer: source), to: destination)
     }
 
+    /// Identity-based variant used while cards continuously move under a drag.
+    func moveProvider(_ source: ProviderID, onto target: ProviderID) {
+        guard let sourceIndex = registeredProviders.firstIndex(of: source),
+              let targetIndex = registeredProviders.firstIndex(of: target) else { return }
+        moveProvider(fromIndex: sourceIndex, ontoIndex: targetIndex)
+    }
+
     /// Drops unknown, not-yet-implemented, and duplicate values. Missing
     /// providers are deliberately not appended: only explicit registrations
     /// belong here.

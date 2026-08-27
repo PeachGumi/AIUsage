@@ -53,16 +53,11 @@ struct DashboardView: View {
                         draggedProvider = provider
                         return NSItemProvider(object: provider.rawValue as NSString)
                     },
-                    acceptDrop: {
-                        guard let source = draggedProvider,
-                              let sourceIndex = settings.registeredProviders.firstIndex(of: source),
-                              let targetIndex = settings.registeredProviders.firstIndex(of: provider) else {
-                            draggedProvider = nil
-                            return false
+                    draggedProvider: $draggedProvider,
+                    moveOnHover: { source, target in
+                        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82)) {
+                            settings.moveProvider(source, onto: target)
                         }
-                        settings.moveProvider(fromIndex: sourceIndex, ontoIndex: targetIndex)
-                        draggedProvider = nil
-                        return true
                     })
             }
         }
@@ -157,7 +152,8 @@ private struct ProviderCard: View {
     let actions: AppActions
     let select: () -> Void
     let beginDrag: () -> NSItemProvider
-    let acceptDrop: () -> Bool
+    @Binding var draggedProvider: ProviderID?
+    let moveOnHover: (ProviderID, ProviderID) -> Void
     @State private var isDropTarget = false
 
     var body: some View {
@@ -166,9 +162,13 @@ private struct ProviderCard: View {
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
                 isDropTarget ? Color.accentColor : isSelected ? ProviderVisuals.accent(provider).opacity(0.7) : Color.primary.opacity(0.08),
                 lineWidth: isDropTarget || isSelected ? 1.5 : 1))
-            .onDrop(of: [.plainText], isTargeted: $isDropTarget) { _ in
-                acceptDrop()
-            }
+            .onDrop(
+                of: [.plainText],
+                delegate: ProviderCardDropDelegate(
+                    target: provider,
+                    draggedProvider: $draggedProvider,
+                    isTargeted: $isDropTarget,
+                    moveOnHover: moveOnHover))
     }
 
     @ViewBuilder
@@ -329,6 +329,37 @@ private struct ProviderCard: View {
                 .help("Remove from AIUsage without signing out")
         }
         .font(.caption)
+    }
+}
+
+private struct ProviderCardDropDelegate: DropDelegate {
+    let target: ProviderID
+    @Binding var draggedProvider: ProviderID?
+    @Binding var isTargeted: Bool
+    let moveOnHover: (ProviderID, ProviderID) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedProvider != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        isTargeted = true
+        guard let source = draggedProvider, source != target else { return }
+        moveOnHover(source, target)
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
+        draggedProvider = nil
+        return true
     }
 }
 
