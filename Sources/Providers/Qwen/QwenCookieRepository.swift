@@ -2,9 +2,8 @@ import Foundation
 import WebKit
 
 /// Serves browser-equivalent Cookie headers per destination URL: WebKit's own
-/// matching decides host, domain, path, Secure, and expiry. Cookies are never
-/// merged across registrable domains because each destination is asked
-/// separately.
+/// store is the source of truth, while this repository applies conservative
+/// destination checks before constructing an explicit Cookie header.
 @MainActor
 final class QwenCookieRepository {
     static let shared = QwenCookieRepository()
@@ -24,7 +23,9 @@ final class QwenCookieRepository {
             .appendingPathComponent("Library/Application Support/QwenUsage/saved_cookies.txt")
     }
 
-    /// Cookie header exactly as a browser would send it to `url`.
+    /// Cookie header for `url`. A legacy QwenUsage cookie file is used only as
+    /// a one-time migration fallback and is permanently ignored once AIUsage
+    /// has completed its own Qwen web login or the user signs out.
     func header(for url: URL) async throws -> String {
         let cookies = await cookies(matching: url)
         let header = cookies
@@ -32,17 +33,18 @@ final class QwenCookieRepository {
             .map { "\($0.name)=\($0.value)" }
             .joined(separator: "; ")
         if !header.isEmpty { return header }
-        // One-time fallback: the legacy QwenUsage header only for hosts it was
-        // originally captured for.
+
         guard Self.isLegacyCompatible(url), !defaults.bool(forKey: Keys.ignoreLegacy),
               let legacy = try? String(contentsOf: legacyURL, encoding: .utf8),
               Self.isValidHeaderShape(legacy)
         else { throw QwenUsageError.notLoggedIn }
-        return legacy
+        return legacy.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func markLoginSucceeded() {
-        defaults.set(false, forKey: Keys.ignoreLegacy)
+        // Never fall back to an older plaintext migration source after a fresh
+        // AIUsage login. Doing so could unexpectedly resurrect stale credentials.
+        defaults.set(true, forKey: Keys.ignoreLegacy)
     }
 
     func logout() async {
@@ -68,13 +70,12 @@ final class QwenCookieRepository {
         }
     }
 
-    /// Mirrors RFC 6265 sending rules closely enough to never cross registrable
-    /// domains: domain-match, host-only match, Secure, and expiry.
+    /// Conservative RFC 6265-style checks for scheme, domain, path and expiry.
     nonisolated static func browserWouldSend(cookie: HTTPCookie, to url: URL) -> Bool {
         guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
         guard url.scheme == "https" || !cookie.isSecure else { return false }
         guard Self.domainMatches(cookieDomain: cookie.domain.lowercased(), host: host) else { return false }
-        guard url.path.hasPrefix(cookie.path.isEmpty ? "/" : cookie.path) else { return false }
+        guard Self.pathMatches(cookiePath: cookie.path, requestPath: url.path) else { return false }
         if let expires = cookie.expiresDate { return expires > Date() }
         return true
     }
@@ -82,6 +83,14 @@ final class QwenCookieRepository {
     nonisolated static func domainMatches(cookieDomain: String, host: String) -> Bool {
         let domain = cookieDomain.hasPrefix(".") ? String(cookieDomain.dropFirst()) : cookieDomain
         return domain == host || host.hasSuffix("." + domain)
+    }
+
+    nonisolated static func pathMatches(cookiePath: String, requestPath: String) -> Bool {
+        let cookiePath = cookiePath.isEmpty ? "/" : cookiePath
+        guard requestPath.hasPrefix(cookiePath) else { return false }
+        if cookiePath == "/" || requestPath == cookiePath || cookiePath.hasSuffix("/") { return true }
+        let boundary = requestPath.index(requestPath.startIndex, offsetBy: cookiePath.count)
+        return boundary < requestPath.endIndex && requestPath[boundary] == "/"
     }
 
     nonisolated static func isQwenFamily(_ domain: String) -> Bool {
@@ -98,7 +107,7 @@ final class QwenCookieRepository {
     /// Reject obviously malformed legacy files: only name=value pairs.
     nonisolated static func isValidHeaderShape(_ header: String) -> Bool {
         let trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains("\n") else { return false }
+        guard !trimmed.isEmpty, !trimmed.contains("\n"), !trimmed.contains("\r") else { return false }
         return trimmed.split(separator: ";").allSatisfy { pair in
             let part = pair.trimmingCharacters(in: .whitespaces)
             guard let equals = part.firstIndex(of: "="), equals != part.startIndex else { return false }
