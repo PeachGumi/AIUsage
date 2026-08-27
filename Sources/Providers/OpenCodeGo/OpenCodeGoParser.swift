@@ -12,11 +12,11 @@ enum OpenCodeGoParser {
         else { throw OpenCodeGoError.invalidResponse }
         guard response.items.count >= 3 else { throw pageError(response) }
 
-        // Prefer the semantic labels exposed by the page so a harmless DOM
-        // reorder cannot swap 5-hour/weekly/monthly usage. Fall back to the
-        // historical first-three ordering only when the labels are incomplete
-        // or unknown, preserving compatibility with older page variants.
-        let items = semanticallyMappedItems(response.items) ?? positionalItems(response.items)
+        // Prefer semantic labels so a harmless DOM reorder cannot swap quota
+        // meanings. Positional fallback is reserved for legacy variants that
+        // expose no recognizable labels at all. Partial/duplicate recognition
+        // is ambiguous and fails closed rather than showing a wrong quota.
+        let items = try semanticallyMappedItems(response.items) ?? positionalItems(response.items)
         let windows = try items.map { kind, item in
             try UsageWindow(
                 kind: kind,
@@ -33,17 +33,18 @@ enum OpenCodeGoParser {
         return OpenCodeGoResult(snapshot: snapshot, workspaceID: workspaceID(response.url))
     }
 
-    private static func semanticallyMappedItems(_ items: [Item]) -> [(UsageWindowKind, Item)]? {
-        var mapped: [(UsageWindowKind, Item)] = []
-        for item in items {
-            guard let kind = kind(from: item.label) else { continue }
-            guard !mapped.contains(where: { $0.0 == kind }) else { return nil }
-            mapped.append((kind, item))
+    private static func semanticallyMappedItems(_ items: [Item]) throws -> [(UsageWindowKind, Item)]? {
+        let recognized = items.compactMap { item -> (UsageWindowKind, Item)? in
+            guard let kind = kind(from: item.label) else { return nil }
+            return (kind, item)
         }
-        guard UsageWindowKind.allCases.allSatisfy({ kind in mapped.contains(where: { $0.0 == kind }) }) else {
-            return nil
-        }
-        return mapped
+        if recognized.isEmpty { return nil }
+
+        let kinds = recognized.map(\.0)
+        guard Set(kinds).count == kinds.count,
+              UsageWindowKind.allCases.allSatisfy(kinds.contains)
+        else { throw OpenCodeGoError.invalidResponse }
+        return recognized
     }
 
     private static func positionalItems(_ items: [Item]) -> [(UsageWindowKind, Item)] {
