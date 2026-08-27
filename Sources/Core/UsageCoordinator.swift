@@ -38,10 +38,11 @@ final class UsageCoordinator: ObservableObject {
     /// registrations so a fresh install performs no provider requests.
     init(providers: [any UsageProvider], enabledProviders: [ProviderID]? = nil) {
         self.providers = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
+        let implementedIDs = Set(self.providers.keys)
         if let enabledProviders {
-            enabledProviderIDs = Set(enabledProviders).intersection(self.providers.keys)
+            enabledProviderIDs = Set(enabledProviders).intersection(implementedIDs)
         } else {
-            enabledProviderIDs = Set(self.providers.keys)
+            enabledProviderIDs = implementedIDs
         }
     }
 
@@ -49,7 +50,7 @@ final class UsageCoordinator: ObservableObject {
     /// cancels in-flight work and drops its cached presentation state without
     /// touching provider credentials/session storage.
     func setEnabledProviders(_ ids: [ProviderID]) {
-        let next = Set(ids).intersection(providers.keys)
+        let next = Set(ids).intersection(Set(providers.keys))
         let removed = enabledProviderIDs.subtracting(next)
         for id in removed {
             generations[id, default: 0] += 1
