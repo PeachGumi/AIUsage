@@ -62,7 +62,14 @@ struct DashboardView: View {
             if settings.registeredProviders.isEmpty {
                 emptyState
             } else {
-                providerList
+                // StatusItemController grows the popover to the natural card
+                // stack until the current display becomes the limiting factor.
+                // At that point this ScrollView, rather than clipping/compressing
+                // cards, provides the required overflow behavior.
+                ScrollView(.vertical) {
+                    providerList
+                }
+                .scrollIndicators(.automatic)
             }
             footer
         }
