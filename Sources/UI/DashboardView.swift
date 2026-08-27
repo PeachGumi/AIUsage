@@ -2,6 +2,8 @@ import SwiftUI
 
 @MainActor
 struct AppActions {
+    let addProvider: (ProviderID) -> Void
+    let removeProvider: (ProviderID) -> Void
     let refreshAll: () -> Void
     let refresh: (ProviderID) -> Void
     let login: (ProviderID) -> Void
@@ -11,8 +13,8 @@ struct AppActions {
     let quit: () -> Void
 }
 
-/// Main window content: one card per provider, all visible without scrolling.
-/// Clicking a card makes that provider the menu bar one; cards reorder by drag.
+/// Main popover content. Supported providers are a catalog; only providers the
+/// user explicitly adds are shown, refreshed, and eligible for menu-bar pinning.
 struct DashboardView: View {
     @ObservedObject var coordinator: UsageCoordinator
     @ObservedObject var settings: SettingsStore
@@ -22,51 +24,99 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            // List gives native drag-to-reorder (onMove); scrollDisabled keeps
-            // every card visible without scrolling.
-            List {
-                ForEach(settings.providerOrder, id: \.self) { provider in
-                    ProviderCard(
-                        provider: provider,
-                        snapshot: coordinator.snapshots[provider],
-                        error: coordinator.errors[provider],
-                        refreshing: coordinator.refreshing.contains(provider),
-                        metric: settings.metric,
-                        isSelected: settings.selectedProvider == provider,
-                        actions: actions,
-                        select: { settings.selectedProvider = provider })
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .padding(.vertical, 6)
-                }
-                .onMove { source, destination in
-                    settings.moveProvider(from: source, to: destination)
-                }
+            if settings.registeredProviders.isEmpty {
+                emptyState
+            } else {
+                providerList
             }
-            .listStyle(.plain)
-            .scrollDisabled(true)
-            .padding(.horizontal, 10)
             footer
         }
         .frame(width: 430)
         .background(.ultraThinMaterial)
     }
 
+    private var providerList: some View {
+        List {
+            ForEach(settings.registeredProviders, id: \.self) { provider in
+                ProviderCard(
+                    provider: provider,
+                    snapshot: coordinator.snapshots[provider],
+                    error: coordinator.errors[provider],
+                    refreshing: coordinator.refreshing.contains(provider),
+                    metric: settings.metric,
+                    isSelected: settings.selectedProvider == provider,
+                    actions: actions,
+                    select: { settings.selectedProvider = provider })
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .padding(.vertical, 6)
+            }
+            .onMove { source, destination in
+                settings.moveProvider(from: source, to: destination)
+            }
+        }
+        .listStyle(.plain)
+        .padding(.horizontal, 10)
+    }
+
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("AI Usage").font(.headline)
-                Text("Click a card to pin it to the menu bar").font(.caption).foregroundStyle(.secondary)
+                Text(settings.registeredProviders.isEmpty
+                     ? "Add a provider to get started"
+                     : "Click a card to pin it to the menu bar")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
+            addProviderMenu
             Button(action: actions.refreshAll) {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
-            .help("Refresh all providers")
-            .accessibilityLabel("Refresh all providers")
+            .disabled(settings.registeredProviders.isEmpty)
+            .help("Refresh registered providers")
+            .accessibilityLabel("Refresh registered providers")
         }
         .padding(14)
+    }
+
+    private var addProviderMenu: some View {
+        Menu {
+            if settings.addableProviders.isEmpty {
+                Button("All supported providers are added") {}
+                    .disabled(true)
+            } else {
+                ForEach(settings.addableProviders) { provider in
+                    Button(provider.displayName) {
+                        actions.addProvider(provider)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "plus")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Add provider")
+        .accessibilityLabel("Add provider")
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "plus.circle.dashed")
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+            Text("No providers added")
+                .font(.headline)
+            Text("Use the + button above to choose a provider.\nAIUsage will only contact providers you add.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(32)
     }
 
     private var footer: some View {
@@ -74,8 +124,10 @@ struct DashboardView: View {
             Button("Settings", systemImage: "gearshape", action: actions.showSettings)
                 .buttonStyle(.borderless)
             Spacer()
-            Text("Drag the grip to reorder").font(.caption2).foregroundStyle(.secondary)
-            Spacer()
+            if !settings.registeredProviders.isEmpty {
+                Text("Drag cards to reorder").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+            }
             Button("Quit", action: actions.quit)
                 .buttonStyle(.borderless)
         }
@@ -130,8 +182,6 @@ private struct ProviderCard: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityHint("Sets this provider as the menu bar display")
         .accessibilityAction(named: "Pin to menu bar", select)
-        // Card tap-through: the card background area (not its buttons) selects
-        // the provider. Buttons inside swallow taps first, so they still work.
         .onTapGesture(perform: select)
     }
 
@@ -196,6 +246,10 @@ private struct ProviderCard: View {
             }
             Spacer()
             Button("Open dashboard") { actions.openDashboard(provider) }.buttonStyle(.link)
+            Button("Remove") { actions.removeProvider(provider) }
+                .buttonStyle(.link)
+                .foregroundStyle(.red)
+                .help("Remove from AIUsage without signing out")
         }
         .font(.caption)
     }
@@ -212,8 +266,6 @@ private struct UsageWindowRow: View {
                 Spacer()
                 Text(valueText).font(.system(.caption, design: .monospaced, weight: .semibold))
             }
-            // The bar always visualizes remaining quota and is labeled as
-            // such, independent of the numeric metric setting.
             ProgressView(value: window.remainingPercent, total: 100)
                 .tint(ProviderVisuals.severity(UsageSeverity(remainingPercent: window.remainingPercent)))
                 .accessibilityLabel(window.label)
