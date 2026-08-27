@@ -38,11 +38,11 @@ final class SettingsStore: ObservableObject {
     }
 
     var addableProviders: [ProviderID] {
-        ProviderID.allCases.filter { !registeredProviders.contains($0) }
+        ProviderID.implemented.filter { !registeredProviders.contains($0) }
     }
 
     func addProvider(_ provider: ProviderID) {
-        guard !registeredProviders.contains(provider) else { return }
+        guard ProviderID.implemented.contains(provider), !registeredProviders.contains(provider) else { return }
         registeredProviders.append(provider)
         if selectedProvider == nil { selectedProvider = provider }
     }
@@ -63,10 +63,12 @@ final class SettingsStore: ObservableObject {
         registeredProviders = providers
     }
 
-    /// Drops unknown raw values and duplicates. Missing supported providers are
-    /// deliberately not appended: only explicit user registrations belong here.
+    /// Drops unknown, not-yet-implemented, and duplicate values. Missing
+    /// providers are deliberately not appended: only explicit registrations
+    /// belong here.
     private static func sanitized(_ rawValues: [String]) -> [ProviderID] {
-        let valid = rawValues.compactMap(ProviderID.init(rawValue:))
+        let implemented = Set(ProviderID.implemented)
+        let valid = rawValues.compactMap(ProviderID.init(rawValue:)).filter(implemented.contains)
         var seen = Set<ProviderID>()
         return valid.filter { seen.insert($0).inserted }
     }
