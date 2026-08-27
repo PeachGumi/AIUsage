@@ -63,6 +63,16 @@ final class SettingsStore: ObservableObject {
         registeredProviders = providers
     }
 
+    /// Moves a dragged provider onto the visual position of another card.
+    /// `Array.move` uses an insertion offset, so forward moves need +1.
+    func moveProvider(fromIndex source: Int, ontoIndex target: Int) {
+        guard registeredProviders.indices.contains(source),
+              registeredProviders.indices.contains(target),
+              source != target else { return }
+        let destination = source < target ? target + 1 : target
+        moveProvider(from: IndexSet(integer: source), to: destination)
+    }
+
     /// Drops unknown, not-yet-implemented, and duplicate values. Missing
     /// providers are deliberately not appended: only explicit registrations
     /// belong here.

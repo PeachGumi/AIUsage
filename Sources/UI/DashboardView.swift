@@ -19,6 +19,7 @@ struct DashboardView: View {
     @ObservedObject var coordinator: UsageCoordinator
     @ObservedObject var settings: SettingsStore
     let actions: AppActions
+    @State private var draggedProvider: ProviderID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +37,7 @@ struct DashboardView: View {
     }
 
     private var providerList: some View {
-        List {
+        VStack(spacing: 12) {
             ForEach(settings.registeredProviders, id: \.self) { provider in
                 ProviderCard(
                     provider: provider,
@@ -45,18 +46,28 @@ struct DashboardView: View {
                     refreshing: coordinator.refreshing.contains(provider),
                     metric: settings.metric,
                     isSelected: settings.selectedProvider == provider,
+                    showsReorderHandle: settings.registeredProviders.count > 1,
                     actions: actions,
-                    select: { settings.selectedProvider = provider })
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .padding(.vertical, 6)
-            }
-            .onMove { source, destination in
-                settings.moveProvider(from: source, to: destination)
+                    select: { settings.selectedProvider = provider },
+                    beginDrag: {
+                        draggedProvider = provider
+                        return NSItemProvider(object: provider.rawValue as NSString)
+                    },
+                    acceptDrop: {
+                        guard let source = draggedProvider,
+                              let sourceIndex = settings.registeredProviders.firstIndex(of: source),
+                              let targetIndex = settings.registeredProviders.firstIndex(of: provider) else {
+                            draggedProvider = nil
+                            return false
+                        }
+                        settings.moveProvider(fromIndex: sourceIndex, ontoIndex: targetIndex)
+                        draggedProvider = nil
+                        return true
+                    })
             }
         }
-        .listStyle(.plain)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     private var header: some View {
@@ -142,15 +153,22 @@ private struct ProviderCard: View {
     let refreshing: Bool
     let metric: UsageMetric
     let isSelected: Bool
+    let showsReorderHandle: Bool
     let actions: AppActions
     let select: () -> Void
+    let beginDrag: () -> NSItemProvider
+    let acceptDrop: () -> Bool
+    @State private var isDropTarget = false
 
     var body: some View {
         card
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(
-                isSelected ? ProviderVisuals.accent(provider).opacity(0.7) : Color.primary.opacity(0.08),
-                lineWidth: isSelected ? 1.5 : 1))
+                isDropTarget ? Color.accentColor : isSelected ? ProviderVisuals.accent(provider).opacity(0.7) : Color.primary.opacity(0.08),
+                lineWidth: isDropTarget || isSelected ? 1.5 : 1))
+            .onDrop(of: [.plainText], isTargeted: $isDropTarget) { _ in
+                acceptDrop()
+            }
     }
 
     @ViewBuilder
@@ -192,6 +210,20 @@ private struct ProviderCard: View {
 
     private var cardHeader: some View {
         HStack(spacing: 9) {
+            if showsReorderHandle {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 24)
+                    .contentShape(Rectangle())
+                    .onDrag(beginDrag) {
+                        Image(systemName: "line.3.horizontal")
+                            .padding(8)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+                    }
+                    .help("Drag to reorder")
+                    .accessibilityLabel("Drag \(provider.displayName) to reorder")
+            }
             Text(provider.shortName)
                 .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(.white)

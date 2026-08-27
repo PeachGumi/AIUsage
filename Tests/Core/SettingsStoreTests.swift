@@ -39,6 +39,34 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(restored.metric, .used)
     }
 
+    func testDroppingEarlierProviderOnLaterCardPlacesItAtThatCardPosition() {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        store.addProvider(.openCodeGo)
+        store.addProvider(.qwen)
+        store.addProvider(.codex)
+
+        store.moveProvider(fromIndex: 0, ontoIndex: 2)
+
+        XCTAssertEqual(store.registeredProviders, [.qwen, .codex, .openCodeGo])
+    }
+
+    func testDroppingLaterProviderOnEarlierCardPlacesItAtThatCardPosition() {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        store.addProvider(.openCodeGo)
+        store.addProvider(.qwen)
+        store.addProvider(.codex)
+
+        store.moveProvider(fromIndex: 2, ontoIndex: 0)
+
+        XCTAssertEqual(store.registeredProviders, [.codex, .openCodeGo, .qwen])
+    }
+
     func testRemovingSelectedProviderFallsBackThenBecomesEmpty() {
         let suite = "AIUsageTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
