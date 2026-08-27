@@ -55,7 +55,27 @@ git diff --check
 
 実アカウントテストは`README.md`記載のopt-in手順でローカル実行し、結果そのものをコミットしないでください。
 
+## Provider登録モデル
+
+対応可能なProviderと、ユーザーが実際に登録したProviderは別概念です。
+
+- `ProviderID.implemented` が **+ メニューへ公開してよい実装済みProvider** のカタログです。
+- `SettingsStore.registeredProviders` はユーザーが明示的に追加したProviderだけを保持します。
+- `UsageCoordinator`は登録済みProviderだけを起動時・定期・手動の全更新対象にします。
+- Removeは表示/更新対象から外す操作で、認証情報の削除とは分離します。
+
+将来のProviderを試作する際は、IDや実装コードが存在していても、テストと失敗時挙動が整うまでは`ProviderID.implemented`へ追加しないでください。これにより未完成Providerを一般ユーザーへ露出させずに開発できます。
+
 ## Providerを追加・変更するとき
+
+新しいProviderを追加する場合は、少なくとも次を確認します。
+
+1. `ProviderID`と表示名/短縮名を追加する。
+2. `UsageProvider`実装をProvider専用ディレクトリへ置く。
+3. AppDelegateのprovider implementation registryへ登録する。
+4. 必要ならログインURL、dashboard URL、WebKit navigation許可範囲、Sign out動作、表示色を追加する。
+5. parser/transport/authのfixtureテストを追加する。
+6. 実アカウントで挙動を確認したあと、最後に`ProviderID.implemented`へ追加する。
 
 通信・認証・解析はProviderディレクトリへ閉じ込め、1サービスの失敗が他サービスへ波及しない設計を維持してください。また、次を満たすようにしてください。
 
@@ -65,12 +85,17 @@ git diff --check
 - parserは実アカウントではなくfixtureで境界値・欠損値・不正値をテストする。
 - upstreamの仕様変更時にユーザーが次に取る行動を判断できるエラーメッセージにする。
 - 取得失敗時に、他Providerや最後に正常取得したsnapshotを不必要に破壊しない。
+- 登録していないProviderへusage取得通信を開始しない。
+- ProviderをRemoveした時点でin-flight取得が結果を書き戻せないことを確認する。
 
 ## UI変更
 
 メニューバーアプリなので、通常ウインドウの感覚だけでなく次も確認してください。
 
 - status itemからPopoverが正しい位置に開閉すること
+- Provider 0件のempty stateと **+** 追加導線
+- Provider追加/Remove/並び替え/メニューバー固定
+- Provider数が少ない間はPopover自体が伸び、画面高を超える場合だけ一覧がスクロールすること
 - ライト/ダークモード
 - VoiceOverのラベルと操作
 - ボタン操作中にカード全体のtap gestureが誤発火しないこと
