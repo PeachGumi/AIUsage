@@ -91,16 +91,16 @@ final class SettingsStoreTests: XCTestCase {
         ]
 
         XCTAssertEqual(
-            ProviderDragLayout.nextIndex(pointerY: 170, currentIndex: 0, slots: slots, hysteresis: 12),
+            ProviderDragLayout.nextIndex(draggedCenterY: 111, currentIndex: 0, slots: slots, hysteresis: 6),
             0)
         XCTAssertEqual(
-            ProviderDragLayout.nextIndex(pointerY: 176, currentIndex: 0, slots: slots, hysteresis: 12),
+            ProviderDragLayout.nextIndex(draggedCenterY: 113, currentIndex: 0, slots: slots, hysteresis: 6),
             1)
         XCTAssertEqual(
-            ProviderDragLayout.nextIndex(pointerY: 150, currentIndex: 1, slots: slots, hysteresis: 12),
+            ProviderDragLayout.nextIndex(draggedCenterY: 101, currentIndex: 1, slots: slots, hysteresis: 6),
             1)
         XCTAssertEqual(
-            ProviderDragLayout.nextIndex(pointerY: 36, currentIndex: 1, slots: slots, hysteresis: 12),
+            ProviderDragLayout.nextIndex(draggedCenterY: 99, currentIndex: 1, slots: slots, hysteresis: 6),
             0)
     }
 

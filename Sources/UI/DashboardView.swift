@@ -2,19 +2,23 @@ import SwiftUI
 
 enum ProviderDragLayout {
     static func nextIndex(
-        pointerY: CGFloat,
+        draggedCenterY: CGFloat,
         currentIndex: Int,
         slots: [CGRect],
         hysteresis: CGFloat
     ) -> Int {
         guard slots.indices.contains(currentIndex) else { return currentIndex }
-        if currentIndex + 1 < slots.count,
-           pointerY > slots[currentIndex + 1].midY + hysteresis {
-            return currentIndex + 1
+        if currentIndex + 1 < slots.count {
+            let lowerBoundary = (slots[currentIndex].midY + slots[currentIndex + 1].midY) / 2
+            if draggedCenterY > lowerBoundary + hysteresis {
+                return currentIndex + 1
+            }
         }
-        if currentIndex > 0,
-           pointerY < slots[currentIndex - 1].midY - hysteresis {
-            return currentIndex - 1
+        if currentIndex > 0 {
+            let upperBoundary = (slots[currentIndex - 1].midY + slots[currentIndex].midY) / 2
+            if draggedCenterY < upperBoundary - hysteresis {
+                return currentIndex - 1
+            }
         }
         return currentIndex
     }
@@ -133,12 +137,13 @@ struct DashboardView: View {
         }
         dragTranslation = ProviderDragLayout.verticalTranslation(value.translation)
 
-        guard let currentIndex = dragCurrentIndex else { return }
+        guard let currentIndex = dragCurrentIndex,
+              let startFrame = dragStartFrame else { return }
         let nextIndex = ProviderDragLayout.nextIndex(
-            pointerY: value.location.y,
+            draggedCenterY: startFrame.midY + dragTranslation.height,
             currentIndex: currentIndex,
             slots: dragSlotFrames,
-            hysteresis: 12)
+            hysteresis: 6)
         guard nextIndex != currentIndex,
               settings.registeredProviders.indices.contains(nextIndex) else {
             hoveredProvider = nil
