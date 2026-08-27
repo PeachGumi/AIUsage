@@ -12,6 +12,7 @@
 		0FD35B5E769A922DF9694FB7 /* OpenCodeGoParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CD476E26D66BDA2D7C753AC /* OpenCodeGoParser.swift */; };
 		11DFD3CD0AF948C801379F58 /* MenuBarPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC9A0C207D6AB5AB978DC649 /* MenuBarPresentationTests.swift */; };
 		1BFFF8AF560ACF398482F620 /* QwenProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42FE90A107F232E296836F34 /* QwenProviderTests.swift */; };
+		230638D86607BE2B950ABE4B /* ProviderVisualsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDFBE5767B0B229DB1A1CA9C /* ProviderVisualsTests.swift */; };
 		24A25A219EC8CB2226F078B0 /* UsageWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA94B52F2B0B8D95CE6388FB /* UsageWindowTests.swift */; };
 		2742ADA97404906D2D44F1CE /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B08063647294A9695B542E /* StatusItemController.swift */; };
 		2E9BED4EC585C7B4D47E7CCF /* QwenUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5246E35C7133405BC4BEC81D /* QwenUsageParser.swift */; };
@@ -96,6 +97,7 @@
 		F627B811B8A1C61B2F57AFF3 /* AIUsageApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIUsageApp.swift; sourceTree = "<group>"; };
 		FBD939567A887A39B1BA14D9 /* CodexUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageParser.swift; sourceTree = "<group>"; };
 		FC9A0C207D6AB5AB978DC649 /* MenuBarPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPresentationTests.swift; sourceTree = "<group>"; };
+		FDFBE5767B0B229DB1A1CA9C /* ProviderVisualsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderVisualsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -124,6 +126,7 @@
 			isa = PBXGroup;
 			children = (
 				5DB6F19AF92DE18B6DEE5C93 /* LoginSuccessRulesTests.swift */,
+				FDFBE5767B0B229DB1A1CA9C /* ProviderVisualsTests.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -382,6 +385,7 @@
 				11DFD3CD0AF948C801379F58 /* MenuBarPresentationTests.swift in Sources */,
 				78AC3A2953F05FB98C54B8D8 /* OpenCodeGoParserTests.swift in Sources */,
 				834504A63C5601EB16E5A569 /* OpenCodeWorkspaceStoreTests.swift in Sources */,
+				230638D86607BE2B950ABE4B /* ProviderVisualsTests.swift in Sources */,
 				1BFFF8AF560ACF398482F620 /* QwenProviderTests.swift in Sources */,
 				0A5DCEC392731FC46E3CB929 /* QwenUsageParserTests.swift in Sources */,
 				6E5526A3597C37AEAAFEEA26 /* SettingsStoreTests.swift in Sources */,

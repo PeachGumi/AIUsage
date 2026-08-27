@@ -11,9 +11,9 @@ enum ProviderVisuals {
 
     static func severity(_ severity: UsageSeverity) -> Color {
         switch severity {
-        case .healthy: .green
-        case .warning: .orange
-        case .critical: .red
+        case .healthy: Color(red: 0.40, green: 0.90, blue: 0.50)
+        case .warning: Color(red: 1.00, green: 0.80, blue: 0.30)
+        case .critical: Color(red: 1.00, green: 0.45, blue: 0.40)
         }
     }
 }

@@ -191,10 +191,12 @@ final class StatusItemController: NSObject {
 
     private func severityColor(_ remaining: Double?) -> NSColor {
         guard let remaining else { return .secondaryLabelColor }
+        // Matches ProviderVisuals.severity (GoUsage palette): brighter than
+        // systemGreen/Orange/Red so the value stays readable in both appearances.
         switch UsageSeverity(remainingPercent: remaining) {
-        case .healthy: return NSColor.systemGreen
-        case .warning: return NSColor.systemOrange
-        case .critical: return NSColor.systemRed
+        case .healthy: return NSColor(srgbRed: 0.40, green: 0.90, blue: 0.50, alpha: 1)
+        case .warning: return NSColor(srgbRed: 1.00, green: 0.80, blue: 0.30, alpha: 1)
+        case .critical: return NSColor(srgbRed: 1.00, green: 0.45, blue: 0.40, alpha: 1)
         }
     }
 
