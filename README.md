@@ -54,11 +54,23 @@ xcodebuild build \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-Release成果物をローカル利用する場合は、必要に応じてad-hoc署名できます。
+## 配布用ZIPを作る
+
+リポジトリ付属のスクリプトで、テスト → Release build → ad-hoc署名 → ZIP化 → SHA-256生成まで同じ手順で実行できます。XcodeGenは不要です。
 
 ```bash
-codesign --force --deep --sign - AIUsage.app
+./Scripts/build_release.sh
 ```
+
+成果物は次に作成されます。
+
+```text
+build/dist/AIUsage.app
+build/dist/AIUsage-macOS.zip
+build/dist/AIUsage-macOS.zip.sha256
+```
+
+このスクリプトの署名はローカル利用・検証向けの**ad-hoc署名**で、Developer ID署名やApple notarizationではありません。GitHub Releasesから未公証バイナリを配布する場合、ダウンロードしたユーザーにはGatekeeperの警告が出る可能性があります。ソース公開だけならDeveloper IDは必須ではありません。
 
 `project.yml`はプロジェクト構成の宣言用にも保持していますが、コミット済み`.xcodeproj`と差分が生じないように扱ってください。XcodeGenで再生成する変更は、生成後の`.xcodeproj`も同じPull Requestで確認・コミットします。
 
