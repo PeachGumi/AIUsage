@@ -4,29 +4,44 @@
 
 macOSのメニューバーから、複数のAIサービスの使用枠をまとめて確認するアプリです。
 
-メニューバーには選択中の1サービスの残量が常に表示され、クリックするとメニューバー直下にPopoverが開き、全サービス（OpenCode Go、Qwen Cloud、OpenAI Codex）の使用枠をカード形式で確認できます。
+AIUsageは**最初から全サービスを有効化しません**。初回起動時はProvider 0件で、メニューバー直下のPopoverにある **+** から、使いたいProviderだけを追加します。追加したProviderだけが表示・更新・通信の対象になります。
+
+現在の実装済みProviderは **OpenCode Go / OpenAI Codex / Qwen Cloud** です。Provider一覧と登録済みProviderを分離しているため、今後ほかのAIサービスを実装しても、十分にテストされるまではユーザーの追加候補へ出さない構造になっています。
 
 > [!IMPORTANT]
 > AIUsageは各サービスの公式SDKではなく、非公開・非安定なusage endpointやWebページ構造を利用します。サービス側の変更で一時的に取得できなくなる可能性があります。認証情報や実レスポンスをIssueへ貼らないでください。
 
 ## 使い方
 
-1. 起動するとメニューバーに選択したサービスの残量が短縮表示されます（例: `GO 5h:99.8% / W:99.9% / M:67.9%`）。
-2. メニューバー表示を**クリック**すると、その直下にPopoverが開きます。もう一度クリックするかPopover外をクリックすると閉じます。
-3. Popover内のカードをクリックすると、そのサービスをメニューバー表示へ固定できます。カードはドラッグで並び替えでき、Sign in / Sign out / Refresh / Open dashboardも各カードから実行できます。
-4. Settingsで表示形式（残量/使用量）を変更できます。
+1. 初回起動時、メニューバーには `AI +` と表示されます。
+2. メニューバー表示を**クリック**すると、その直下にPopoverが開きます。
+3. 右上の **+** から OpenCode Go / OpenAI Codex / Qwen Cloud のうち使いたいProviderを追加します。
+4. 追加したProviderだけがカードとして表示され、以後バックグラウンド更新の対象になります。
+5. カードをクリックすると、そのProviderをメニューバー表示へ固定できます。カードはドラッグで並び替えできます。
+6. Providerカードから Refresh / Sign in / Sign out / Open dashboard / Remove を実行できます。**RemoveはAIUsageの登録から外すだけで、Sign outや認証情報削除は行いません。**
+7. Settingsでメニューバー表示Providerと表示形式（残量/使用量）を変更できます。
+
+PopoverはProvider数に応じて縦に伸びます。少数のProviderで最初から小さなスクロール領域にはせず、画面の利用可能高さを超えるほど登録した場合だけ一覧がスクロールします。
 
 ## 対応サービスと初期設定
 
 | Provider | 取得方法 | 初期設定 |
 |---|---|---|
-| OpenCode Go | ログイン済みページをWKWebViewで解析 | カードの **Sign in** からOpenCodeへログイン |
-| Qwen Cloud | Qwen Cloudのusage API | カードの **Sign in** からQwen Cloudへログイン |
-| OpenAI Codex | ChatGPT usage endpoint | Codex CLIでログインし、`~/.codex/auth.json`が存在する状態にする |
+| OpenCode Go | ログイン済みページをWKWebViewで解析 | **+** から追加後、カードの **Sign in** からOpenCodeへログイン |
+| OpenAI Codex | ChatGPT usage endpoint | Codex CLIでログインし、`~/.codex/auth.json`が存在する状態にしてから **+** で追加 |
+| Qwen Cloud | Qwen Cloudのusage API | **+** から追加後、カードの **Sign in** からQwen Cloudへログイン |
 
-Providerごとに取得処理を分離しており、1サービスの取得失敗時も、他サービスの状態と最後に正常取得できた値は可能な限り維持します。
+Providerごとに取得処理を分離しており、1サービスの取得失敗時も、他サービスの状態と最後に正常取得できた値は可能な限り維持します。登録していないProviderには起動時・定期更新・Popover表示時のusage取得を行いません。
 
 Qwenの旧QwenUsage Cookie移行は`https://home.qwencloud.com`だけに限定され、AIUsageで新たにWebログインした後、またはSign outした後は旧平文Cookieへフォールバックしません。
+
+## Provider拡張方針
+
+UIがProviderごとの固定カードを直接持つのではなく、実装済みProviderのカタログとユーザーの登録状態を分離しています。
+
+新しいProviderを開発するときは、Provider IDと取得実装を追加しただけではユーザー向け候補に自動公開せず、認証・usage解析・失敗時挙動・fixtureテストまで確認したうえで実装済みカタログへ追加します。これにより、Claude / Gemini / GitHub Copilot等の将来対応を試作しても、未検証のProviderを一般ユーザーへ誤って露出させにくくしています。
+
+現時点では上記3Provider以外について、実アカウント契約を前提とした取得実装は入れていません。
 
 ## 必要環境
 
@@ -76,6 +91,10 @@ build/dist/AIUsage-macOS.zip.sha256
 
 ## トラブルシューティング
 
+### Providerが何も表示されない
+
+正常です。初回起動は空の状態から始まります。Popover右上の **+** から使用するProviderを追加してください。
+
 ### `Codex login not found`
 
 Codex CLI側でログインできているか確認してください。AIUsageは`~/.codex/auth.json`を読み取るだけで、認証情報を書き換えません。
@@ -88,6 +107,12 @@ PopoverのQwen Cloudカードから **Sign in** を実行してください。�
 
 PopoverのOpenCode Goカードから **Sign in** を実行してください。ログイン後、workspace IDはローカルのUserDefaultsへ保存されます。
 
+### RemoveとSign outの違い
+
+**Remove** はProviderをAIUsageの一覧・バックグラウンド更新対象から外すだけです。WebKitログイン状態やCodex CLIの認証状態は変更しません。再追加しやすい動作です。
+
+認証状態まで消したい場合は、Removeする前にProviderカードの **Sign out** を使用してください。CodexはAIUsageが`~/.codex/auth.json`を書き換えないため、Codex CLI側でログアウトします。
+
 ### 昨日まで取得できていたのに急に失敗する
 
 Provider側の非公開APIまたはDOM変更の可能性があります。まず **Refresh** を試し、それでも継続する場合は既存Issueを確認してから、新しいIssueを作成してください。その際、OAuthトークン、Cookie、アカウントID、workspace ID、実APIレスポンス全文は投稿しないでください。
@@ -95,6 +120,8 @@ Provider側の非公開APIまたはDOM変更の可能性があります。まず
 ## テスト
 
 通常のテストは認証情報を使わないfixtureだけで実行されます。Pull Requestでは、SwiftファイルのXcodeプロジェクト登録漏れ、ユニットテスト、Releaseビルド、Swift compiler warningをCIで検査します。
+
+登録Provider 0件では外部取得を開始しないこと、追加・削除で更新対象が切り替わること、Popoverが画面高までは拡張されることもユニットテストで確認します。
 
 ローカルの実セッションを使うテストは明示的なopt-inです。
 
@@ -114,6 +141,7 @@ rm -f /tmp/aiusage-live-tests-enabled
 ## プライバシー
 
 - 外部分析、テレメトリー、広告SDKはありません。
+- 登録していないProviderへusage取得通信を行いません。
 - 認証情報や使用率をUnified Loggingへ定期出力しません。
 - CodexのBearer付きリクエストとQwenのCookie付きリクエストはHTTPリダイレクトを拒否します。
 - Qwenの旧Cookieファイルは移行元として読み取るだけで、AIUsage側の平文ファイルへ複製せず、新しいログイン後は再利用しません。
