@@ -43,9 +43,7 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         // A controller is retained per provider and may be reused after a
         // successful sign-in or manual close. Reset one-shot state before each
         // new browser session so subsequent sign-ins can complete normally.
-        successTask?.cancel()
-        successTask = nil
-        isCompleting = false
+        cancelPendingSuccess()
 
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
@@ -68,13 +66,11 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
     }
 
     func close() {
-        successTask?.cancel()
-        successTask = nil
+        cancelPendingSuccess()
         webView?.stopLoading()
         window?.orderOut(nil)
         window = nil
         webView = nil
-        isCompleting = false
     }
 
     /// Only provider account hosts and their OAuth endpoints may load inside
@@ -94,7 +90,16 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
     }
 
     private func handlePossibleSuccess(url: URL) {
-        guard !isCompleting, LoginSuccessRules.isSuccess(provider: provider, url: url) else { return }
+        guard LoginSuccessRules.isSuccess(provider: provider, url: url) else {
+            // A dashboard can finish loading briefly before its client-side auth
+            // redirect. If that redirect reaches a login page within the grace
+            // period, invalidate the earlier success candidate instead of
+            // closing the window as if authentication had succeeded.
+            cancelPendingSuccess()
+            return
+        }
+        guard !isCompleting else { return }
+
         isCompleting = true
         successTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
@@ -102,6 +107,12 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
             close()
             onSuccess(url)
         }
+    }
+
+    private func cancelPendingSuccess() {
+        successTask?.cancel()
+        successTask = nil
+        isCompleting = false
     }
 }
 
@@ -121,11 +132,9 @@ extension WebLoginWindowController: WKNavigationDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        successTask?.cancel()
-        successTask = nil
+        cancelPendingSuccess()
         webView?.stopLoading()
         window = nil
         webView = nil
-        isCompleting = false
     }
 }
