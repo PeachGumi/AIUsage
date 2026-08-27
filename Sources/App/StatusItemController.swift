@@ -191,28 +191,12 @@ final class StatusItemController: NSObject {
 
     private func severityColor(_ remaining: Double?) -> NSColor {
         guard let remaining else { return .secondaryLabelColor }
-        // Matches ProviderVisuals.severity (GoUsage palette): brighter than
-        // systemGreen/Orange/Red so the value stays readable in both appearances.
-        switch UsageSeverity(remainingPercent: remaining) {
-        case .healthy: return NSColor(srgbRed: 0.40, green: 0.90, blue: 0.50, alpha: 1)
-        case .warning: return NSColor(srgbRed: 1.00, green: 0.80, blue: 0.30, alpha: 1)
-        case .critical: return NSColor(srgbRed: 1.00, green: 0.45, blue: 0.40, alpha: 1)
-        }
+        return ProviderVisuals.severityRGB(
+            UsageSeverity(remainingPercent: remaining)
+        ).nsColor
     }
 
-    private func brandColor(_ provider: ProviderID, appearance: NSAppearance?) -> NSColor {
-        let dark = (appearance ?? NSApp.effectiveAppearance)
-            .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        switch provider {
-        case .openCodeGo:
-            return dark ? NSColor(calibratedRed: 0.35, green: 0.85, blue: 0.90, alpha: 1)
-                : NSColor(calibratedRed: 0.00, green: 0.42, blue: 0.48, alpha: 1)
-        case .qwen:
-            return dark ? NSColor(calibratedRed: 0.68, green: 0.55, blue: 1.00, alpha: 1)
-                : NSColor(calibratedRed: 0.38, green: 0.22, blue: 0.72, alpha: 1)
-        case .codex:
-            return dark ? NSColor(calibratedRed: 0.55, green: 0.62, blue: 1.00, alpha: 1)
-                : NSColor(calibratedRed: 0.22, green: 0.27, blue: 0.68, alpha: 1)
-        }
+    private func brandColor(_ provider: ProviderID, appearance _: NSAppearance?) -> NSColor {
+        ProviderVisuals.accentRGB(provider).nsColor
     }
 }
