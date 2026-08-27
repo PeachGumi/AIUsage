@@ -6,11 +6,20 @@ final class OpenCodeWorkspaceStore {
 
     init(defaults: UserDefaults = .standard, legacyURL: URL? = nil) {
         self.defaults = defaults
-        let stored = defaults.string(forKey: Keys.workspaceID)
+        let stored = Self.valid(defaults.string(forKey: Keys.workspaceID))
         let legacy = legacyURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/GoUsage/workspace_id.txt")
-        workspaceID = Self.valid(stored) ?? Self.readLegacy(legacy)
-        if let workspaceID { defaults.set(workspaceID, forKey: Keys.workspaceID) }
+        let migrated = defaults.bool(forKey: Keys.ignoreLegacy) ? nil : Self.readLegacy(legacy)
+
+        workspaceID = stored ?? migrated
+        if let workspaceID {
+            defaults.set(workspaceID, forKey: Keys.workspaceID)
+        }
+        if migrated != nil {
+            // Migration is intentionally one-shot. A later sign-out must not
+            // resurrect an old GoUsage workspace on the next app launch.
+            defaults.set(true, forKey: Keys.ignoreLegacy)
+        }
     }
 
     var usageURL: URL {
@@ -22,6 +31,13 @@ final class OpenCodeWorkspaceStore {
         guard let value = Self.valid(candidate) else { return }
         workspaceID = value
         defaults.set(value, forKey: Keys.workspaceID)
+        defaults.set(true, forKey: Keys.ignoreLegacy)
+    }
+
+    func clear() {
+        workspaceID = nil
+        defaults.removeObject(forKey: Keys.workspaceID)
+        defaults.set(true, forKey: Keys.ignoreLegacy)
     }
 
     private static func readLegacy(_ url: URL) -> String? {
@@ -36,5 +52,8 @@ final class OpenCodeWorkspaceStore {
         return candidate
     }
 
-    private enum Keys { static let workspaceID = "opencode.workspaceID" }
+    private enum Keys {
+        static let workspaceID = "opencode.workspaceID"
+        static let ignoreLegacy = "opencode.ignoreLegacyWorkspaceID"
+    }
 }
