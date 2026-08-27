@@ -99,9 +99,8 @@ final class QwenCookieRepository {
             normalized == "qianwenai.com" || normalized.hasSuffix(".qianwenai.com")
     }
 
-    nonisolated private static func isLegacyCompatible(_ url: URL) -> Bool {
-        guard let host = url.host?.lowercased() else { return false }
-        return host == "home.qwencloud.com" || host.hasSuffix(".qwencloud.com")
+    nonisolated static func isLegacyCompatible(_ url: URL) -> Bool {
+        url.scheme == "https" && url.host?.lowercased() == "home.qwencloud.com"
     }
 
     /// Reject obviously malformed legacy files: only name=value pairs.
