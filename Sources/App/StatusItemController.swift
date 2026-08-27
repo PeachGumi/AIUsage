@@ -5,22 +5,26 @@ import SwiftUI
 @MainActor
 final class StatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let popover = NSPopover()
     private let coordinator: UsageCoordinator
     private let settings: SettingsStore
-    private var dashboardWindow: NSWindow?
     private var cancellables: Set<AnyCancellable> = []
 
     init(coordinator: UsageCoordinator, settings: SettingsStore, actions: AppActions) {
         self.coordinator = coordinator
         self.settings = settings
-        self.actions = actions
         super.init()
+
+        let dashboard = DashboardView(coordinator: coordinator, settings: settings, actions: actions)
+        popover.contentViewController = NSHostingController(rootView: dashboard)
+        popover.contentSize = NSSize(width: 430, height: 640)
+        popover.behavior = .transient
+        popover.animates = true
+
         configureButton()
         observeChanges()
         render()
     }
-
-    private let actions: AppActions
 
     private func configureButton() {
         guard let button = statusItem.button else { return }
@@ -53,43 +57,23 @@ final class StatusItemController: NSObject {
             .store(in: &cancellables)
     }
 
-    /// Left click cycles the displayed provider (users switch often);
-    /// right click (or command-click) opens the dashboard window.
+    /// A menu bar click toggles the dashboard directly under the status item.
+    /// Provider selection remains available by clicking a card in the popover.
     @objc private func handleClick() {
-        guard let event = NSApp.currentEvent else { cycleProvider(); return }
-        if event.type == .rightMouseUp || event.modifierFlags.contains(.command) {
-            showDashboard(actions: actions)
-        } else {
-            cycleProvider()
-        }
-    }
-
-    private func cycleProvider() {
-        // Cycle through the user's dashboard order rather than the raw enum.
-        let order = settings.providerOrder
-        guard let index = order.firstIndex(of: settings.selectedProvider) else { return }
-        settings.selectedProvider = order[(index + 1) % order.count]
-    }
-
-    private func showDashboard(actions: AppActions) {
-        if let window = dashboardWindow {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
             return
         }
-        let dashboard = DashboardView(coordinator: coordinator, settings: settings, actions: actions)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 640),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false)
-        window.title = "AI Usage"
-        window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: dashboard)
-        window.center()
-        dashboardWindow = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+
+        // Opening the dashboard is a strong signal that the user wants current
+        // data. Avoid needless traffic when the background refresh is recent.
+        Task { @MainActor [weak self] in
+            await self?.coordinator.refreshIfStale(olderThan: 60)
+        }
     }
 
     private func render() {
@@ -102,7 +86,7 @@ final class StatusItemController: NSObject {
         statusItem.length = image.size.width + 8
         button.image = image
         let tooltip = accessibilityText(provider: provider, snapshot: snapshot, hasError: hasError)
-        button.toolTip = tooltip + "\nClick: switch service · Right-click: details"
+        button.toolTip = tooltip + "\nClick: show details"
         button.setAccessibilityLabel("AIUsage, \(tooltip)")
     }
 
