@@ -104,12 +104,17 @@ enum OpenCodeGoParser {
     }
 }
 
-enum OpenCodeGoError: LocalizedError, Equatable {
+enum OpenCodeGoError: LocalizedError, Equatable, ProviderAuthenticationError {
     case notLoggedIn
     case notSubscribed
     case otherWorkspaceMember
     case invalidResponse
     case navigation(String)
+
+    var requiresAuthentication: Bool {
+        if case .notLoggedIn = self { return true }
+        return false
+    }
 
     var errorDescription: String? {
         switch self {
