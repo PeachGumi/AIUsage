@@ -42,6 +42,8 @@ git diff --check
 
 `project.yml`やターゲット構成を変更してXcodeGenを使う場合は、生成された`.xcodeproj`の差分を確認し、必要な変更を同じPull Requestへ含めてください。無関係なproject file差分を大量に混ぜないでください。
 
+Version/BuildはXcode build settingの`MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`を正とし、`Info.plist`へ別の固定値を追加しないでください。
+
 ## テストデータ
 
 通常のfixtureは架空の値だけを使ってください。以下をfixture、ログ、Issue、Pull Requestへ含めないでください。
@@ -75,16 +77,18 @@ git diff --check
 3. AppDelegateのprovider implementation registryへ登録する。
 4. 必要ならログインURL、dashboard URL、WebKit navigation許可範囲、Sign out動作、表示色を追加する。
 5. parser/transport/authのfixtureテストを追加する。
-6. 実アカウントで挙動を確認したあと、最後に`ProviderID.implemented`へ追加する。
+6. 認証切れを表すProviderエラーでは`ProviderAuthenticationError`を実装し、通常のtimeout/429/5xxと認証要求を区別する。
+7. 実アカウントで挙動を確認したあと、最後に`ProviderID.implemented`へ追加する。
 
 通信・認証・解析はProviderディレクトリへ閉じ込め、1サービスの失敗が他サービスへ波及しない設計を維持してください。また、次を満たすようにしてください。
 
 - 認証付きHTTPリクエストのredirect先へ資格情報を持ち越さない。
+- 明示的なCookie headerやBearer tokenをHTTPS以外へ送らない。
 - Cookieやtokenをログへ出さない。
 - 想定外レスポンスを成功扱いしない（fail closed）。
 - parserは実アカウントではなくfixtureで境界値・欠損値・不正値をテストする。
 - upstreamの仕様変更時にユーザーが次に取る行動を判断できるエラーメッセージにする。
-- 取得失敗時に、他Providerや最後に正常取得したsnapshotを不必要に破壊しない。
+- timeout/429/5xxなど一時的な失敗で、直前の認証済み状態や正常snapshotを不必要に破壊しない。
 - 登録していないProviderへusage取得通信を開始しない。
 - ProviderをRemoveした時点でin-flight取得が結果を書き戻せないことを確認する。
 
@@ -100,6 +104,7 @@ git diff --check
 - VoiceOverのラベルと操作
 - ボタン操作中にカード全体のtap gestureが誤発火しないこと
 - 取得中・エラー・stale状態が区別できること
+- 一時的な通信エラーだけで`Sign out`が`Sign in`へ誤って切り替わらないこと
 
 ## セキュリティ問題
 

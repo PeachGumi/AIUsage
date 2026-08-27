@@ -12,8 +12,23 @@ extension UsageProvider {
     func cancelActiveFetch() {}
 }
 
+/// Provider-specific errors can opt into this protocol without making Core
+/// depend on concrete provider error enums. Authentication state therefore
+/// survives ordinary network/upstream failures instead of being inferred from
+/// the presence of any error string.
+protocol ProviderAuthenticationError: Error {
+    var requiresAuthentication: Bool { get }
+}
+
+enum ProviderAuthenticationState: Equatable, Sendable {
+    case unknown
+    case authenticated
+    case required
+}
+
 struct ProviderFailure: Error, Equatable, Sendable {
     let message: String
+    let requiresAuthentication: Bool
 }
 
 struct ProviderFetchOutcome: Sendable {
@@ -26,6 +41,7 @@ final class UsageCoordinator: ObservableObject {
     @Published private(set) var snapshots: [ProviderID: ProviderSnapshot] = [:]
     @Published private(set) var errors: [ProviderID: String] = [:]
     @Published private(set) var refreshing: Set<ProviderID> = []
+    @Published private(set) var authenticationStates: [ProviderID: ProviderAuthenticationState] = [:]
 
     private let providers: [ProviderID: any UsageProvider]
     private var enabledProviderIDs: Set<ProviderID>
@@ -44,6 +60,8 @@ final class UsageCoordinator: ObservableObject {
         } else {
             enabledProviderIDs = implementedIDs
         }
+        authenticationStates = Dictionary(
+            uniqueKeysWithValues: enabledProviderIDs.map { ($0, ProviderAuthenticationState.unknown) })
     }
 
     /// Applies the user's current registration set. Removing a provider also
@@ -52,12 +70,17 @@ final class UsageCoordinator: ObservableObject {
     func setEnabledProviders(_ ids: [ProviderID]) {
         let next = Set(ids).intersection(Set(providers.keys))
         let removed = enabledProviderIDs.subtracting(next)
+        let added = next.subtracting(enabledProviderIDs)
         for id in removed {
             generations[id, default: 0] += 1
             providers[id]?.cancelActiveFetch()
             snapshots.removeValue(forKey: id)
             errors.removeValue(forKey: id)
             refreshing.remove(id)
+            authenticationStates.removeValue(forKey: id)
+        }
+        for id in added {
+            authenticationStates[id] = .unknown
         }
         enabledProviderIDs = next
     }
@@ -94,9 +117,16 @@ final class UsageCoordinator: ObservableObject {
         do {
             outcome = ProviderFetchOutcome(provider: id, result: .success(try await provider.fetch()))
         } catch is CancellationError {
-            outcome = ProviderFetchOutcome(provider: id, result: .failure(ProviderFailure(message: "Cancelled")))
+            outcome = ProviderFetchOutcome(
+                provider: id,
+                result: .failure(ProviderFailure(message: "Cancelled", requiresAuthentication: false)))
         } catch {
-            outcome = ProviderFetchOutcome(provider: id, result: .failure(ProviderFailure(message: error.localizedDescription)))
+            let authError = error as? any ProviderAuthenticationError
+            outcome = ProviderFetchOutcome(
+                provider: id,
+                result: .failure(ProviderFailure(
+                    message: error.localizedDescription,
+                    requiresAuthentication: authError?.requiresAuthentication == true)))
         }
         // A newer refresh, provider removal, or sign-out superseded this
         // request: drop it so stale results never overwrite newer state.
@@ -115,6 +145,9 @@ final class UsageCoordinator: ObservableObject {
         snapshots.removeValue(forKey: id)
         errors[id] = message
         refreshing.remove(id)
+        if enabledProviderIDs.contains(id) {
+            authenticationStates[id] = .required
+        }
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
@@ -128,8 +161,15 @@ final class UsageCoordinator: ObservableObject {
         case let .success(snapshot):
             snapshots[outcome.provider] = snapshot
             errors.removeValue(forKey: outcome.provider)
+            authenticationStates[outcome.provider] = .authenticated
         case let .failure(error):
             errors[outcome.provider] = error.message
+            if error.requiresAuthentication {
+                authenticationStates[outcome.provider] = .required
+            }
+            // Transient failures intentionally leave the previous auth state
+            // untouched. A timeout/429/5xx must not turn a Sign out control into
+            // a misleading Sign in control while stale usage is still visible.
         }
     }
 }

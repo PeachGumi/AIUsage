@@ -13,10 +13,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     })
     private lazy var codexProvider = CodexProvider()
 
-    /// Concrete provider implementations live in one registry. The UI catalog
-    /// is ProviderID.allCases, while SettingsStore decides which of these the
-    /// user has explicitly registered. Future providers should plug in here
-    /// without requiring dashboard-specific branching.
+    /// Concrete provider implementations live in one registry. The Add
+    /// Provider UI exposes ProviderID.implemented, while SettingsStore decides
+    /// which implementations the user has explicitly registered. Future
+    /// providers can be developed without becoming user-visible until promoted
+    /// into that implemented catalog.
     private lazy var providerImplementations: [any UsageProvider] = [
         codexProvider,
         qwenProvider,
@@ -80,6 +81,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func removeProvider(_ provider: ProviderID) {
+        // Registration removal is intentionally not sign-out, but any login
+        // window opened from the removed card should no longer stay active.
+        loginControllers[provider]?.close()
         settings.removeProvider(provider)
         coordinator.setEnabledProviders(settings.registeredProviders)
     }

@@ -125,11 +125,16 @@ enum QwenUsageParser {
     }
 }
 
-enum QwenUsageError: LocalizedError, Equatable {
+enum QwenUsageError: LocalizedError, Equatable, ProviderAuthenticationError {
     case notLoggedIn
     case noActiveSubscription
     case invalidResponse
     case http(Int)
+
+    var requiresAuthentication: Bool {
+        if case .notLoggedIn = self { return true }
+        return false
+    }
 
     var errorDescription: String? {
         switch self {

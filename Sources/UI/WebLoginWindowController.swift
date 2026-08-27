@@ -6,11 +6,15 @@ enum LoginSuccessRules {
         guard url.scheme == "https" else { return false }
         switch provider {
         case .openCodeGo:
-            return url.host == "opencode.ai" && !url.path.contains("/auth")
+            guard url.host == "opencode.ai" else { return false }
+            let path = url.path
+            return path == "/console" || path.hasPrefix("/console/") ||
+                path.range(of: #"^/workspace/wrk_[A-Za-z0-9_-]+(?:/go)?/?$"#, options: .regularExpression) != nil
         case .qwen:
-            return url.host == "home.qwencloud.com" &&
-                !url.path.lowercased().contains("login") &&
-                !url.path.lowercased().contains("signin")
+            // The login starts from this billing area; require returning to it
+            // rather than treating an arbitrary public home/error page as proof
+            // that an authenticated Qwen session exists.
+            return url.host == "home.qwencloud.com" && url.path.hasPrefix("/billing/")
         case .codex:
             return false
         }

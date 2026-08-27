@@ -70,10 +70,13 @@ final class QwenCookieRepository {
         }
     }
 
-    /// Conservative RFC 6265-style checks for scheme, domain, path and expiry.
+    /// Conservative RFC 6265-style domain/path/expiry checks with an
+    /// application-level HTTPS requirement. AIUsage constructs an explicit
+    /// Cookie header for authenticated Qwen requests, so it never forwards
+    /// those credentials over plaintext HTTP even when a cookie lacks Secure.
     nonisolated static func browserWouldSend(cookie: HTTPCookie, to url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https" else { return false }
         guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
-        guard url.scheme == "https" || !cookie.isSecure else { return false }
         guard Self.domainMatches(cookieDomain: cookie.domain.lowercased(), host: host) else { return false }
         guard Self.pathMatches(cookiePath: cookie.path, requestPath: url.path) else { return false }
         if let expires = cookie.expiresDate { return expires > Date() }

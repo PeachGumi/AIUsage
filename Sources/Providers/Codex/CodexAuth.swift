@@ -50,16 +50,18 @@ enum CodexAuth {
     }
 }
 
-enum CodexAuthError: LocalizedError {
+enum CodexAuthError: LocalizedError, ProviderAuthenticationError {
     case notFound
     case invalidFile
     case missingOAuthToken
 
+    var requiresAuthentication: Bool { true }
+
     var errorDescription: String? {
         switch self {
         case .notFound: "Codex login not found. Run codex login first."
-        case .invalidFile: "Codex auth.json could not be read."
-        case .missingOAuthToken: "Codex auth.json has no OAuth access token."
+        case .invalidFile: "Codex auth.json could not be read. Run codex login again if the problem continues."
+        case .missingOAuthToken: "Codex auth.json has no OAuth access token. Run codex login again."
         }
     }
 }

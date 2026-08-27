@@ -19,9 +19,11 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.snapshots[.codex]?.windows.first?.usedPercent, 20)
         XCTAssertNotNil(coordinator.errors[.qwen])
         XCTAssertNil(coordinator.errors[.codex])
+        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
+        XCTAssertEqual(coordinator.authenticationStates[.qwen], .unknown)
     }
 
-    func testFailedRefreshRetainsLastValidSnapshot() async throws {
+    func testFailedRefreshRetainsLastValidSnapshotAndAuthenticatedState() async throws {
         let initial = ProviderSnapshot(
             provider: .codex,
             planName: nil,
@@ -35,6 +37,17 @@ final class UsageCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(coordinator.snapshots[.codex], initial)
         XCTAssertNotNil(coordinator.errors[.codex])
+        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
+    }
+
+    func testAuthenticationFailureIsTrackedSeparatelyFromTransientErrors() async {
+        let provider = StubProvider(id: .qwen, result: .failure(TestAuthenticationError.required))
+        let coordinator = UsageCoordinator(providers: [provider])
+
+        await coordinator.refresh(.qwen)
+
+        XCTAssertEqual(coordinator.authenticationStates[.qwen], .required)
+        XCTAssertNotNil(coordinator.errors[.qwen])
     }
 
     func testMarkSignedOutClearsOnlySelectedProvider() async throws {
@@ -59,7 +72,9 @@ final class UsageCoordinatorTests: XCTestCase {
 
         XCTAssertNil(coordinator.snapshots[.qwen])
         XCTAssertEqual(coordinator.errors[.qwen], "Sign in required")
+        XCTAssertEqual(coordinator.authenticationStates[.qwen], .required)
         XCTAssertNotNil(coordinator.snapshots[.codex])
+        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
     }
 
     func testExplicitlyEmptyRegistrationPerformsNoProviderRequests() async {
@@ -73,6 +88,7 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertEqual(codex.fetchCount, 0)
         XCTAssertEqual(qwen.fetchCount, 0)
         XCTAssertTrue(coordinator.snapshots.isEmpty)
+        XCTAssertTrue(coordinator.authenticationStates.isEmpty)
     }
 
     func testChangingRegistrationControlsRefreshAndClearsRemovedPresentationState() async {
@@ -84,14 +100,18 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertEqual(codex.fetchCount, 1)
         XCTAssertEqual(qwen.fetchCount, 0)
         XCTAssertNotNil(coordinator.snapshots[.codex])
+        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
 
         coordinator.setEnabledProviders([.qwen])
         XCTAssertNil(coordinator.snapshots[.codex])
+        XCTAssertNil(coordinator.authenticationStates[.codex])
+        XCTAssertEqual(coordinator.authenticationStates[.qwen], .unknown)
 
         await coordinator.refreshAll()
         XCTAssertEqual(codex.fetchCount, 1)
         XCTAssertEqual(qwen.fetchCount, 1)
         XCTAssertNotNil(coordinator.snapshots[.qwen])
+        XCTAssertEqual(coordinator.authenticationStates[.qwen], .authenticated)
     }
 
     func testRefreshAllStartsProvidersWithoutWaitingForEachOther() async {
@@ -142,6 +162,7 @@ final class UsageCoordinatorTests: XCTestCase {
 
         XCTAssertNil(coordinator.snapshots[.qwen])
         XCTAssertEqual(coordinator.errors[.qwen], "Sign in required")
+        XCTAssertEqual(coordinator.authenticationStates[.qwen], .required)
         XCTAssertFalse(coordinator.refreshing.contains(.qwen))
     }
 
@@ -239,3 +260,8 @@ private final class SequencedProvider: UsageProvider {
 }
 
 private enum TestError: Error { case failed }
+
+private enum TestAuthenticationError: Error, ProviderAuthenticationError {
+    case required
+    var requiresAuthentication: Bool { true }
+}

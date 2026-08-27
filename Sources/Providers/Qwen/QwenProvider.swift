@@ -66,13 +66,17 @@ final class QwenProvider: UsageProvider {
         cookieHeader: String) throws -> URLRequest
     {
         let wrapped = try wrappedData(data, api: api)
-        let params = String(data: try JSONSerialization.data(withJSONObject: wrapped), encoding: .utf8)!
-        var components = URLComponents(url: URLs.gateway, resolvingAgainstBaseURL: false)!
+        let json = try JSONSerialization.data(withJSONObject: wrapped)
+        guard let params = String(data: json, encoding: .utf8),
+              var components = URLComponents(url: URLs.gateway, resolvingAgainstBaseURL: false)
+        else { throw QwenUsageError.invalidResponse }
         components.queryItems = [
             URLQueryItem(name: "product", value: "sfm_bailian"),
             URLQueryItem(name: "action", value: "IntlBroadScopeAspnGateway"),
             URLQueryItem(name: "api", value: api),
         ]
+        guard let gatewayURL = components.url else { throw QwenUsageError.invalidResponse }
+
         var body = URLComponents()
         body.queryItems = [
             URLQueryItem(name: "product", value: "sfm_bailian"),
@@ -81,12 +85,15 @@ final class QwenProvider: UsageProvider {
             URLQueryItem(name: "region", value: "ap-southeast-1"),
             URLQueryItem(name: "params", value: params),
         ]
-        var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        guard let encodedBody = body.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B"),
+              let bodyData = encodedBody.data(using: .utf8)
+        else { throw QwenUsageError.invalidResponse }
+
+        var request = URLRequest(url: gatewayURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
-        let encodedBody = body.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-        request.httpBody = encodedBody?.data(using: .utf8)
+        request.httpBody = bodyData
         return request
     }
 

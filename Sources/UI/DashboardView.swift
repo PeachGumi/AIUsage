@@ -62,7 +62,14 @@ struct DashboardView: View {
             if settings.registeredProviders.isEmpty {
                 emptyState
             } else {
-                providerList
+                // StatusItemController grows the popover to the natural card
+                // stack until the current display becomes the limiting factor.
+                // At that point this ScrollView, rather than clipping/compressing
+                // cards, provides the required overflow behavior.
+                ScrollView(.vertical) {
+                    providerList
+                }
+                .scrollIndicators(.automatic)
             }
             footer
         }
@@ -112,6 +119,7 @@ struct DashboardView: View {
             snapshot: coordinator.snapshots[provider],
             error: coordinator.errors[provider],
             refreshing: coordinator.refreshing.contains(provider),
+            authenticationState: coordinator.authenticationStates[provider] ?? .unknown,
             metric: settings.metric,
             isSelected: settings.selectedProvider == provider,
             showsReorderHandle: settings.registeredProviders.count > 1,
@@ -258,6 +266,7 @@ private struct ProviderCard: View {
     let snapshot: ProviderSnapshot?
     let error: String?
     let refreshing: Bool
+    let authenticationState: ProviderAuthenticationState
     let metric: UsageMetric
     let isSelected: Bool
     let showsReorderHandle: Bool
@@ -309,7 +318,16 @@ private struct ProviderCard: View {
     }
 
     private var accessibilitySummary: String {
-        let status = error != nil ? "needs attention" : snapshot == nil ? "loading" : "available"
+        let status: String
+        if authenticationState == .required {
+            status = "sign in required"
+        } else if error != nil {
+            status = "needs attention"
+        } else if snapshot == nil {
+            status = "loading"
+        } else {
+            status = "available"
+        }
         return "\(provider.displayName), \(status)\(isSelected ? ", shown in menu bar" : "")"
     }
 
@@ -376,16 +394,28 @@ private struct ProviderCard: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var cardActions: some View {
-        HStack(spacing: 14) {
-            Button("Refresh") { actions.refresh(provider) }.buttonStyle(.link)
-            if provider != .codex {
-                if error == nil && snapshot != nil {
+    @ViewBuilder
+    private var authenticationAction: some View {
+        if provider != .codex {
+            switch authenticationState {
+            case .authenticated:
+                Button("Sign out") { actions.logout(provider) }.buttonStyle(.link)
+            case .required:
+                Button("Sign in") { actions.login(provider) }.buttonStyle(.link)
+            case .unknown:
+                if snapshot != nil {
                     Button("Sign out") { actions.logout(provider) }.buttonStyle(.link)
                 } else {
                     Button("Sign in") { actions.login(provider) }.buttonStyle(.link)
                 }
             }
+        }
+    }
+
+    private var cardActions: some View {
+        HStack(spacing: 14) {
+            Button("Refresh") { actions.refresh(provider) }.buttonStyle(.link)
+            authenticationAction
             Spacer()
             Button("Open dashboard") { actions.openDashboard(provider) }.buttonStyle(.link)
             Button("Remove") { actions.removeProvider(provider) }
