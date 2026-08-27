@@ -62,6 +62,38 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertNotNil(coordinator.snapshots[.codex])
     }
 
+    func testExplicitlyEmptyRegistrationPerformsNoProviderRequests() async {
+        let codex = CountingProvider(id: .codex)
+        let qwen = CountingProvider(id: .qwen)
+        let coordinator = UsageCoordinator(providers: [codex, qwen], enabledProviders: [])
+
+        await coordinator.refreshAll()
+        await coordinator.refresh(.codex)
+
+        XCTAssertEqual(codex.fetchCount, 0)
+        XCTAssertEqual(qwen.fetchCount, 0)
+        XCTAssertTrue(coordinator.snapshots.isEmpty)
+    }
+
+    func testChangingRegistrationControlsRefreshAndClearsRemovedPresentationState() async {
+        let codex = CountingProvider(id: .codex)
+        let qwen = CountingProvider(id: .qwen)
+        let coordinator = UsageCoordinator(providers: [codex, qwen], enabledProviders: [.codex])
+
+        await coordinator.refreshAll()
+        XCTAssertEqual(codex.fetchCount, 1)
+        XCTAssertEqual(qwen.fetchCount, 0)
+        XCTAssertNotNil(coordinator.snapshots[.codex])
+
+        coordinator.setEnabledProviders([.qwen])
+        XCTAssertNil(coordinator.snapshots[.codex])
+
+        await coordinator.refreshAll()
+        XCTAssertEqual(codex.fetchCount, 1)
+        XCTAssertEqual(qwen.fetchCount, 1)
+        XCTAssertNotNil(coordinator.snapshots[.qwen])
+    }
+
     func testRefreshAllStartsProvidersWithoutWaitingForEachOther() async {
         let first = GatedProvider(id: .codex)
         let second = GatedProvider(id: .qwen)
@@ -71,8 +103,6 @@ final class UsageCoordinatorTests: XCTestCase {
         await yieldUntil { first.hasEntered && second.hasEntered }
         let overlapped = first.hasEntered && second.hasEntered
 
-        // Always unblock the task, including when this assertion would fail on
-        // a future regression to sequential refreshes.
         first.releaseGate()
         second.releaseGate()
         await yieldUntil { first.hasEntered && second.hasEntered }
@@ -133,6 +163,30 @@ private final class StubProvider: UsageProvider {
     }
 
     func fetch() async throws -> ProviderSnapshot { try result.get() }
+}
+
+@MainActor
+private final class CountingProvider: UsageProvider {
+    let id: ProviderID
+    private(set) var fetchCount = 0
+
+    init(id: ProviderID) {
+        self.id = id
+    }
+
+    func fetch() async throws -> ProviderSnapshot {
+        fetchCount += 1
+        return ProviderSnapshot(
+            provider: id,
+            planName: nil,
+            windows: [try UsageWindow(
+                kind: .weekly,
+                label: "Weekly",
+                usedPercent: 25,
+                resetsAt: nil,
+                resetDescription: nil)],
+            fetchedAt: Date())
+    }
 }
 
 @MainActor
