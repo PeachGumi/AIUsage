@@ -58,6 +58,8 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Provider types are a catalog, not unique registrations. Every type stays
+    /// in the Add menu no matter how many account instances already exist.
     var addableProviders: [ProviderID] { ProviderID.implemented }
 
     var selectedProvider: ProviderInstance? {
@@ -68,7 +70,21 @@ final class SettingsStore: ObservableObject {
     @discardableResult
     func addProvider(_ provider: ProviderID) -> ProviderInstance? {
         guard ProviderID.implemented.contains(provider) else { return nil }
-        let instance = ProviderInstance(provider: provider)
+        let matching = registeredProviders.indices.filter { registeredProviders[$0].provider == provider }
+        let ordinal = matching.count + 1
+
+        // Keep a single account visually clean. As soon as a second account is
+        // added, give the original a deterministic local label so two identical
+        // provider names are immediately distinguishable.
+        if matching.count == 1,
+           let first = matching.first,
+           registeredProviders[first].accountLabel == nil {
+            registeredProviders[first] = registeredProviders[first].withAccountLabel("Account 1")
+        }
+
+        let instance = ProviderInstance(
+            provider: provider,
+            accountLabel: matching.isEmpty ? nil : "Account \(ordinal)")
         registeredProviders.append(instance)
         if selectedProviderInstanceID == nil { selectedProviderInstanceID = instance.id }
         return instance
