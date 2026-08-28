@@ -6,8 +6,6 @@ import WebKit
 /// can remain signed into different accounts simultaneously.
 @MainActor
 final class QwenCookieRepository {
-    static let shared = QwenCookieRepository()
-
     let dataStore: WKWebsiteDataStore
     private let defaults: UserDefaults
     private let legacyURL: URL
