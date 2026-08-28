@@ -41,8 +41,6 @@ struct AppActions {
     let quit: () -> Void
 }
 
-/// Main popover content. Supported providers are a catalog; only providers the
-/// user explicitly adds are shown, refreshed, and eligible for menu-bar pinning.
 struct DashboardView: View {
     @ObservedObject var coordinator: UsageCoordinator
     @ObservedObject var settings: SettingsStore
@@ -62,10 +60,6 @@ struct DashboardView: View {
             if settings.registeredProviders.isEmpty {
                 emptyState
             } else {
-                // StatusItemController grows the popover to the natural card
-                // stack until the current display becomes the limiting factor.
-                // At that point this ScrollView, rather than clipping/compressing
-                // cards, provides the required overflow behavior.
                 ScrollView(.vertical) {
                     providerList
                 }
@@ -96,9 +90,7 @@ struct DashboardView: View {
             if let provider = draggedProvider, let start = dragStartFrame {
                 providerCard(provider, floating: true)
                     .frame(width: start.width, height: start.height)
-                    .position(
-                        x: start.midX,
-                        y: start.midY + dragTranslation.height)
+                    .position(x: start.midX, y: start.midY + dragTranslation.height)
                     .scaleEffect(1.025)
                     .shadow(color: .black.opacity(0.30), radius: 14, y: 8)
                     .zIndex(100)
@@ -189,13 +181,11 @@ struct DashboardView: View {
             }
             Spacer()
             addProviderMenu
-            Button(action: actions.refreshAll) {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .disabled(settings.registeredProviders.isEmpty)
-            .help("Refresh registered providers")
-            .accessibilityLabel("Refresh registered providers")
+            Button(action: actions.refreshAll) { Image(systemName: "arrow.clockwise") }
+                .buttonStyle(.borderless)
+                .disabled(settings.registeredProviders.isEmpty)
+                .help("Refresh registered providers")
+                .accessibilityLabel("Refresh registered providers")
         }
         .padding(14)
     }
@@ -203,13 +193,10 @@ struct DashboardView: View {
     private var addProviderMenu: some View {
         Menu {
             if settings.addableProviders.isEmpty {
-                Button("All supported providers are added") {}
-                    .disabled(true)
+                Button("All supported providers are added") {}.disabled(true)
             } else {
                 ForEach(settings.addableProviders) { provider in
-                    Button(provider.displayName) {
-                        actions.addProvider(provider)
-                    }
+                    Button(provider.displayName) { actions.addProvider(provider) }
                 }
             }
         } label: {
@@ -226,8 +213,7 @@ struct DashboardView: View {
             Image(systemName: "plus.circle.dashed")
                 .font(.system(size: 34))
                 .foregroundStyle(.secondary)
-            Text("No providers added")
-                .font(.headline)
+            Text("No providers added").font(.headline)
             Text("Use the + button above to choose a provider.\nAIUsage will only contact providers you add.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -246,8 +232,7 @@ struct DashboardView: View {
                 Text("Drag cards to reorder").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
             }
-            Button("Quit", action: actions.quit)
-                .buttonStyle(.borderless)
+            Button("Quit", action: actions.quit).buttonStyle(.borderless)
         }
         .padding(12)
     }
@@ -396,7 +381,9 @@ private struct ProviderCard: View {
 
     @ViewBuilder
     private var authenticationAction: some View {
-        if provider != .codex {
+        if provider == .zai {
+            Button("API key…") { actions.login(provider) }.buttonStyle(.link)
+        } else if provider.managesAuthentication {
             switch authenticationState {
             case .authenticated:
                 Button("Sign out") { actions.logout(provider) }.buttonStyle(.link)
