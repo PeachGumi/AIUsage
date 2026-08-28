@@ -750,6 +750,113 @@ final class AntigravityRemoteProvider: UsageProvider {
             "Antigravity credentials do not contain a usable access or refresh token.")
     }
 
+    /// Parses both the local Connect-RPC envelope used by Antigravity.app and
+    /// the bare Cloud Code quota-summary shape returned by Google OAuth.
+    /// Remote buckets are matched by exact IDs so future model-specific lanes
+    /// are never silently folded into an existing quota.
+    static func parseRemoteQuotaSummary(
+        data: Data,
+        now: Date = Date()
+    ) throws -> ProviderSnapshot {
+        if let snapshot = try? AntigravityProvider.parseQuotaSummary(data: data, now: now) {
+            return snapshot
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw MajorProviderError.invalidResponse(
+                "Antigravity returned invalid remote quota-summary JSON.")
+        }
+        let root = (json["response"] as? [String: Any]) ?? json
+        guard let groups = root["groups"] as? [[String: Any]] else {
+            throw MajorProviderError.invalidResponse(
+                "Antigravity remote quota summary did not contain groups.")
+        }
+
+        struct Spec {
+            let kind: UsageWindowKind
+            let label: String
+            let compactLabel: String
+            let windowID: String
+        }
+        let specs: [String: Spec] = [
+            "gemini-5h": Spec(
+                kind: .fiveHour,
+                label: "Gemini 5-hour",
+                compactLabel: "G5",
+                windowID: "antigravity-gemini-fiveHour"),
+            "gemini-weekly": Spec(
+                kind: .weekly,
+                label: "Gemini Weekly",
+                compactLabel: "GW",
+                windowID: "antigravity-gemini-weekly"),
+            "3p-5h": Spec(
+                kind: .fiveHour,
+                label: "Claude/GPT 5-hour",
+                compactLabel: "C5",
+                windowID: "antigravity-thirdparty-fiveHour"),
+            "3p-weekly": Spec(
+                kind: .weekly,
+                label: "Claude/GPT Weekly",
+                compactLabel: "CW",
+                windowID: "antigravity-thirdparty-weekly"),
+        ]
+
+        var seen = Set<String>()
+        var windows: [UsageWindow] = []
+        for group in groups {
+            guard let buckets = group["buckets"] as? [[String: Any]] else { continue }
+            for bucket in buckets {
+                guard let bucketID = bucket["bucketId"] as? String,
+                      let spec = specs[bucketID],
+                      seen.insert(bucketID).inserted,
+                      let remaining = fraction(bucket["remainingFraction"])
+                        ?? fraction((bucket["remaining"] as? [String: Any])?["remainingFraction"]),
+                      (0...1).contains(remaining) else {
+                    continue
+                }
+                let reset = resetDate(bucket)
+                windows.append(try UsageWindow(
+                    id: spec.windowID,
+                    kind: spec.kind,
+                    label: spec.label,
+                    compactLabel: spec.compactLabel,
+                    usedPercent: (1 - remaining) * 100,
+                    resetsAt: reset,
+                    resetDescription: nil))
+            }
+        }
+
+        guard !windows.isEmpty else {
+            throw MajorProviderError.invalidResponse(
+                "Antigravity remote quota summary contained no recognized quota buckets.")
+        }
+        return ProviderSnapshot(
+            provider: .antigravity,
+            planName: nil,
+            windows: windows,
+            fetchedAt: now)
+    }
+
+    private static func fraction(_ raw: Any?) -> Double? {
+        if let value = raw as? NSNumber { return value.doubleValue }
+        if let value = raw as? String { return Double(value) }
+        return nil
+    }
+
+    private static func resetDate(_ bucket: [String: Any]) -> Date? {
+        for key in ["resetTime", "reset_time", "resetsAt", "resets_at"] {
+            if let text = bucket[key] as? String,
+               let date = MajorProviderHTTP.isoDate(text) {
+                return date
+            }
+            if let number = fraction(bucket[key]) {
+                return Date(timeIntervalSince1970:
+                    number > 10_000_000_000 ? number / 1000 : number)
+            }
+        }
+        return nil
+    }
+
     private enum RemoteSnapshotResult {
         case success(ProviderSnapshot)
         case authFailed
@@ -777,7 +884,7 @@ final class AntigravityRemoteProvider: UsageProvider {
                 if http.statusCode == 401 || http.statusCode == 403 { return .authFailed }
                 guard (200...299).contains(http.statusCode) else { continue }
                 do {
-                    return .success(try AntigravityProvider.parseQuotaSummary(data: data))
+                    return .success(try Self.parseRemoteQuotaSummary(data: data))
                 } catch {
                     return .invalid(error)
                 }
