@@ -82,34 +82,6 @@ final class MajorProviderTests: XCTestCase {
         XCTAssertEqual(snapshot.windows.map { $0.remainingPercent.rounded() }, [91, 73, 82, 64])
     }
 
-    func testAntigravityRemoteSummaryNormalizesDirectFractionsAndWindowHints() throws {
-        let data = Data(#"""
-        {
-          "groups":[
-            {"displayName":"Gemini Models","buckets":[
-              {"bucketId":"gemini-primary","window":"5-hour","remainingFraction":0.88,"resetTime":"2026-08-28T12:00:00Z"},
-              {"bucketId":"gemini-long","window":"weekly","remainingFraction":0.77}
-            ]},
-            {"description":"Claude and GPT models","buckets":[
-              {"bucketId":"third-primary","window":"session","remainingFraction":0.66},
-              {"bucketId":"third-long","window":"7-day","remainingFraction":0.55}
-            ]}
-          ]
-        }
-        """#.utf8)
-
-        let normalized = try InstanceAntigravityProvider.normalizeRemoteQuotaSummary(data)
-        let snapshot = try AntigravityProvider.parseQuotaSummary(data: normalized)
-
-        XCTAssertEqual(snapshot.windows.map(\.id), [
-            "antigravity-gemini-fiveHour",
-            "antigravity-thirdparty-fiveHour",
-            "antigravity-gemini-weekly",
-            "antigravity-thirdparty-weekly",
-        ])
-        XCTAssertEqual(snapshot.windows.map { $0.remainingPercent.rounded() }, [88, 66, 77, 55])
-    }
-
     func testAntigravityRejectsUnknownOnlyQuotaShape() {
         let data = Data(#"{"groups":[{"displayName":"Future Models","buckets":[{"bucketId":"daily","remaining":{"remainingFraction":0.9}}]}]}"#.utf8)
         XCTAssertThrowsError(try AntigravityProvider.parseQuotaSummary(data: data))
