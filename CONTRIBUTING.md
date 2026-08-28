@@ -8,15 +8,15 @@ IssueやPull Requestを歓迎します。AIUsageは認証済みセッション�
 - Xcode 16.2以降
 - XcodeGen（`project.yml`またはターゲット構成を変更するときだけ必要）
 
-通常のビルドとCIは、リポジトリにコミットされている`AIUsage.xcodeproj`を使います。
+通常のビルドとCIはコミット済み`AIUsage.xcodeproj`を使います。
 
-## 開発手順
+## 基本手順
 
-1. 変更前に、可能なら失敗するテストを既存のテストターゲットへ追加します。
-2. 最小の実装でテストを通します。
-3. 全テストとReleaseビルドを実行します。
-4. compiler warningと`git diff --check`を確認します。
-5. 認証情報、実APIレスポンス、workspace IDなどがdiffへ入っていないことを確認します。
+1. 可能なら変更前に失敗するテストを追加する。
+2. 最小の実装でテストを通す。
+3. Unit TestsとRelease buildを実行する。
+4. compiler warningと`git diff --check`を確認する。
+5. token、Cookie、実APIレスポンス、workspace IDなどがdiffへ入っていないことを確認する。
 
 ```bash
 xcodebuild test \
@@ -36,102 +36,118 @@ xcodebuild build \
 git diff --check
 ```
 
-## Xcodeプロジェクト
+## ProviderInstanceモデル
 
-`project.yml`とコミット済み`AIUsage.xcodeproj`の両方を保持しています。ソースやテストの`.swift`ファイルを追加した場合、**そのファイルがXcode targetのSources build phaseへ登録されていることを必ず確認してください**。CIも登録漏れを検出します。
+- `ProviderID`は統合種別です。同じProviderIDを持つカードが複数存在してよい前提で実装します。
+- `ProviderInstance`は固有UUIDを持つ1アカウント / 1カードです。
+- snapshot、error、auth state、refresh state、menu-bar selection、remove、rebuildはUUIDで識別します。
+- 各Providerの最初のカードは`ProviderInstance.legacyID(for:)`を使うstable **default slot**です。旧one-card-per-provider設定の移行IDと共通にすることで、既存ユーザーとfresh installで同じcredential境界を使います。
+- 外部CLI / アプリのambient credentialを利用できるのは原則default slotだけです。
+- 追加カードはカード固有credentialを明示的に設定し、未設定・読み取り失敗時に兄弟カードのambient credentialへfallbackしてはいけません。
+- `SettingsStore`と`UsageCoordinator`の両方でduplicate UUIDをfatalにしない防御を維持します。
 
-`project.yml`やターゲット構成を変更してXcodeGenを使う場合は、生成された`.xcodeproj`の差分を確認し、必要な変更を同じPull Requestへ含めてください。無関係なproject file差分を大量に混ぜないでください。
+## Provider公開ルール
 
-Version/BuildはXcode build settingの`MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`を正とし、`Info.plist`へ別の固定値を追加しないでください。
+`ProviderID.implemented`が **+** メニューへ公開する統合です。新しいProviderは実装しただけでは追加しません。
+
+最低限、次を満たしてください。
+
+1. parser / transport / authentication failureのfixture test
+2. credentialの保存先・送信先・ownershipの明文化
+3. unexpected responseを成功扱いしないfail-closed behavior
+4. default slotとduplicate slotのcredential sourceの明確化
+5. 同一Providerの2カードでrefresh / failure / remove / rebuildが相互汚染しないテスト
+6. duplicate cardがambient credentialへ黙ってfallbackしないテストまたは構造上の保証
+7. 実アカウント検証前に公開する場合はExperimental表示とREADME記載
+
+## Removeの境界
+
+Removeは現在のカードUUIDに属する**AIUsage所有データを掃除**し、外部クライアント所有データは触りません。
+
+削除するもの:
+
+- UUID別Keychain secret
+- UUID別credential file path（ファイル本体は削除・変更しない）
+- 新規OpenCode / Qwen instanceの専用WebKit data / workspace情報
+- 削除カードのin-flight runtime state
+
+削除しないもの:
+
+- 旧バージョンから移行した共有default WebKit profile
+- Codex CLI / Claude Code / GitHub CLI / Cursor.app / Kimi Code / Antigravityなど外部クライアント所有credential
+
+Remove経路で、すでにdictionaryから取り出したinstance storeをcache accessor経由で再生成・再挿入しないよう注意してください。
+
+## Antigravity
+
+Antigravityは現在**1つのlocal sessionだけ**を公開します。複数カードはSettingsStoreで禁止します。
+
+AIUsageへ以下の方式を追加しないでください。
+
+- AntigravityのGoogle OAuth client metadataを別アプリartifactから抽出して第三者OAuthを開始する
+- Antigravityのrefresh token / access tokenをAIUsage所有credentialとして保存する
+- そのtokenでGoogleのremote Antigravity / Cloud Code quota endpointへ直接アクセスする
+
+複数アカウントを実装する場合は、公式Antigravity CLIがcustom status-line scriptへ提供するdocumented local JSON payload（quota / email / plan tier等）を優先してください。AIUsage自身がGoogle account credentialを保持しないpassive ingestionを目標にします。
+
+現行のExperimental Antigravity providerは実行中local processを検出します。将来status-line方式へ置き換える際も、未知payloadはfail closedし、実tokenや生status payloadをログへ残さないでください。
+
+## WebKit Provider
+
+OpenCode Go / Qwenではduplicate cardごとにpersistent `WKWebsiteDataStore`を分離します。
+
+- default slotだけが旧WebKit profile / legacy migration sourceを利用可能
+- 追加カードでlegacy Cookie / workspace IDを再利用しない
+- Sign out / Removeは対象カードだけに作用する
+- Qwen CookieはHTTPS / domain / path / expiryを検証する
+
+## File / token Provider
+
+Codex / Claudeのduplicate cardは別credential fileを明示選択します。AIUsageはpathだけを設定へ保存し、ファイルは読み取り専用です。
+
+Copilot / Cursor / Kimiのduplicate cardはUUID別Keychain secretを利用します。Keychain read errorを`try?`で握りつぶしてambient loginへfallbackしないでください。
+
+Z.AIはUUID別API keyを使い、legacy key / environment fallbackはdefault slotだけに限定します。
+
+## 通信とエラー処理
+
+- credential付きHTTP redirectへ資格情報を持ち越さない。
+- 明示Cookie / bearer tokenをHTTPへ送らない。
+- token / Cookie / account ID / workspace IDをログへ出さない。
+- timeout / 429 / 5xxだけで認証済みstateやlast-good snapshotを破壊しない。
+- authentication errorとtransient failureを区別する。
+- 未登録Providerへusage取得通信を開始しない。
+- card Remove / Sign out後に古い非同期結果を書き戻さない。
+
+## Xcode project
+
+`.swift`ファイルを追加した場合、コミット済みXcode projectのSources build phaseへ登録してください。CIが登録漏れを検出します。
+
+Version / Buildは`MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`を正とし、`Info.plist`へ別固定値を追加しません。
 
 ## テストデータ
 
-通常のfixtureは架空の値だけを使ってください。以下をfixture、ログ、Issue、Pull Requestへ含めないでください。
+fixture / log / Issue / PRへ以下を含めないでください。
 
-- OAuth access token / refresh token
+- OAuth access / refresh token
 - API key / bearer token
 - Cookie / Cookie header
-- ChatGPT account ID
-- OpenCode workspace ID
-- 実利用率を含む実APIレスポンス全文
+- account ID / workspace ID
+- 実利用率を含む認証済みAPIレスポンス全文
 - 個人を特定できるアカウント情報
 
-実アカウントテストは`README.md`記載のopt-in手順でローカル実行し、結果そのものをコミットしないでください。
-
-## Provider登録モデル
-
-Providerの統合種別と、ユーザーが登録する1アカウントは別概念です。
-
-- `ProviderID` は統合種別です。同じ`ProviderID`のカードが複数存在してよい前提で実装してください。
-- `ProviderInstance` は固有UUIDを持つ1アカウント/1カードです。永続設定、snapshot、error、auth state、refresh state、menu-bar selectionはUUIDで識別します。
-- `ProviderID.implemented` が **+ メニューへ公開するProvider** のカタログです。実アカウント未検証の実装を公開する場合は`isExperimental`を必ず有効にし、UIとREADMEで明示します。
-- `SettingsStore.registeredProviders` はユーザーが明示的に追加した`ProviderInstance`だけを保持します。重複`ProviderID`をdeduplicateしてはいけません。
-- `UsageCoordinator`は登録済みinstanceだけを起動時・定期・手動の全更新対象にします。
-- 旧one-card-per-provider設定から移行する最初のinstanceにはstable legacy UUIDを使い、既存sessionを壊さない互換経路を限定的に許可します。
-
-### Removeのルール
-
-Removeは単に一覧から隠すだけではありません。現在のカードUUIDに属する**AIUsage所有データを掃除**し、外部クライアント所有データは触らない境界を維持してください。
-
-- UUID別Keychain secret / OAuth credentialは削除する。
-- UUID別credential file pathは削除するが、参照先ファイル自体は削除・変更しない。
-- 新規OpenCode / Qwen instanceの専用WebKit profile / workspace情報は削除する。
-- 旧バージョンから移行した共有legacy profileは、他の既存利用を壊さないため破壊的に削除しない。
-- Codex CLI / Claude Code / GitHub CLI / Cursor.app / Kimi Codeなど外部クライアント所有credentialは削除しない。
-- Remove時点でin-flight取得を無効化し、古い結果が削除済みカードへ書き戻らないことを保証する。
-
-将来のProviderを試作する際は、IDや実装コードが存在していても、fixtureテスト、認証境界、fail-closedの失敗時挙動、**同一Providerの複数instance間の分離**が整うまでは`ProviderID.implemented`へ追加しないでください。実アカウント検証前に公開する必要がある場合はExperimental扱いとし、公式dashboardとの照合結果やサニタイズ済み修正PRを募集してください。
-
-## Providerを追加・変更するとき
-
-新しいProviderを追加する場合は、少なくとも次を確認します。
-
-1. `ProviderID`と表示名/短縮名を追加する。
-2. `UsageProvider`実装をProvider専用ディレクトリへ置く。
-3. AppDelegateのinstance-aware runtime factoryへ登録する。
-4. 同一Providerを2枚以上追加したときのcredential sourceを決める。ambient credentialしか使えない実装を「複数アカウント対応」と誤表現しない。
-5. 必要ならログインURL、dashboard URL、WebKit navigation許可範囲、Sign out / Disconnect動作、表示色を追加する。
-6. parser/transport/authのfixtureテストを追加する。
-7. 認証切れを表すProviderエラーでは`ProviderAuthenticationError`相当の扱いを実装し、通常のtimeout/429/5xxと認証要求を区別する。
-8. 2つの同一Provider instanceについて、refresh / failure / remove / rebuild / sign-outが兄弟instanceへ影響しないことをテストする。
-9. 実アカウントで挙動を確認したあと、最後に`ProviderID.implemented`へ追加する。未検証のまま公開する場合は`isExperimental`、README、Issue Formを同時に更新する。
-
-通信・認証・解析はProviderディレクトリへ閉じ込め、1サービス・1アカウントの失敗が他へ波及しない設計を維持してください。また、次を満たすようにしてください。
-
-- 認証付きHTTPリクエストのredirect先へ資格情報を持ち越さない。
-- 明示的なCookie headerやBearer tokenをHTTPS以外へ送らない。
-- Cookieやtokenをログへ出さない。
-- 想定外レスポンスを成功扱いしない（fail closed）。
-- parserは実アカウントではなくfixtureで境界値・欠損値・不正値をテストする。
-- upstreamの仕様変更時にユーザーが次に取る行動を判断できるエラーメッセージにする。
-- timeout/429/5xxなど一時的な失敗で、直前の認証済み状態や正常snapshotを不必要に破壊しない。
-- 登録していないProviderへusage取得通信を開始しない。
-- instance Aのcredentialをinstance Bへ黙ってフォールバックしない。互換目的のambient sourceを使う場合は対象instanceと条件を明示する。
-- Provider cardをRemoveした時点でin-flight取得が結果を書き戻せないことを確認する。
-
-## Antigravity固有ルール
-
-新規Antigravity instanceは、別カードやambient Antigravity local sessionへ黙ってフォールバックさせないでください。各カードのGoogle OAuth token / refresh tokenはUUID別Keychain itemへ保存し、そのカードのremote quota取得にだけ使用します。
-
-旧バージョンから移行した最初のAntigravity instanceのみ、専用OAuth credentialが未設定の間は互換性のため従来local integrationを利用できます。
-
-OAuth client metadataや実tokenをfixture / sourceへコミットしないでください。client metadataはruntime discoveryまたは開発者向け環境変数で与え、実tokenはKeychain外へ永続化しません。
+Live TestsはREADMEのopt-in手順だけで実行し、結果をコミットしないでください。
 
 ## UI変更
 
-メニューバーアプリなので、通常ウインドウの感覚だけでなく次も確認してください。
-
-- status itemからPopoverが正しい位置に開閉すること
-- Provider 0件のempty stateと **+** 追加導線
-- 同じProviderを複数回追加でき、カードを区別できること
-- Provider追加/Remove/Rename/並び替え/メニューバー固定
-- Provider数が少ない間はPopover自体が伸び、画面高を超える場合だけ一覧がスクロールすること
-- ライト/ダークモード
-- VoiceOverのラベルと操作
-- ボタン操作中にカード全体のtap gestureが誤発火しないこと
-- 取得中・エラー・stale状態が区別できること
-- 一時的な通信エラーだけで`Sign out`が`Sign in`へ誤って切り替わらないこと
-- Remove / Sign out / Account…の説明が実際のcredential ownershipと一致していること
+- Provider 0件のempty state
+- duplicate cardの追加 / Rename / drag / menu-bar selection
+- Account…のcredential ownership説明
+- transient error時にSign outが誤ってSign inへ変わらないこと
+- Remove helpが実際の削除範囲と一致すること
+- ライト / ダークモード
+- VoiceOver label
+- multi-displayでpopover位置・scroll上限
 
 ## セキュリティ問題
 
