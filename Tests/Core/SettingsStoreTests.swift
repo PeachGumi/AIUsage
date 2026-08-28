@@ -22,10 +22,49 @@ final class SettingsStoreTests: XCTestCase {
 
             XCTAssertEqual(store.registeredProviders.map(\.provider), [.codex, .codex, .codex])
             XCTAssertEqual(Set(store.registeredProviders.map(\.id)).count, 3)
+            XCTAssertEqual(first.id, ProviderInstance.legacyID(for: .codex))
+            XCTAssertNotEqual(second.id, first.id)
+            XCTAssertNotEqual(third.id, first.id)
             XCTAssertEqual(store.instance(first.id)?.accountLabel, "Account 1")
             XCTAssertEqual(store.instance(second.id)?.accountLabel, "Account 2")
             XCTAssertEqual(store.instance(third.id)?.accountLabel, "Account 3")
             XCTAssertTrue(store.addableProviders.contains(.codex))
+        }
+    }
+
+    func testFirstFreshAccountUsesStableDefaultSlot() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            for provider in ProviderID.implemented where provider != .antigravity {
+                let instance = store.addProvider(provider)!
+                XCTAssertEqual(instance.id, ProviderInstance.legacyID(for: provider))
+            }
+        }
+    }
+
+    func testAntigravityIsLimitedToOneOfficialLocalSession() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.antigravity)
+
+            XCTAssertEqual(first?.id, ProviderInstance.legacyID(for: .antigravity))
+            XCTAssertFalse(store.addableProviders.contains(.antigravity))
+            XCTAssertNil(store.addProvider(.antigravity))
+            XCTAssertEqual(store.instances(of: .antigravity).count, 1)
+        }
+    }
+
+    func testPersistedNonDefaultAntigravityInstanceIsSanitizedOut() throws {
+        try withDefaultsThrowing { defaults in
+            let instances = [
+                ProviderInstance(id: ProviderInstance.legacyID(for: .antigravity), provider: .antigravity),
+                ProviderInstance(provider: .antigravity, accountLabel: "Old OAuth experiment"),
+            ]
+            defaults.set(try JSONEncoder().encode(instances), forKey: "providerInstances.v1")
+
+            let store = SettingsStore(defaults: defaults)
+            XCTAssertEqual(store.instances(of: .antigravity).count, 1)
+            XCTAssertEqual(store.instances(of: .antigravity).first?.id, ProviderInstance.legacyID(for: .antigravity))
         }
     }
 
