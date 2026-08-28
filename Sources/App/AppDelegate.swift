@@ -129,12 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // support before they can return different data.
             return AntigravityProvider()
         case .copilot:
-            if let token = try? ProviderInstanceAccountStore.secret(for: instance), let token {
+            if let token = try? ProviderInstanceAccountStore.secret(for: instance) {
                 return InstanceCopilotProvider(token: token)
             }
             return CopilotProvider()
         case .cursor:
-            if let token = try? ProviderInstanceAccountStore.secret(for: instance), let token {
+            if let token = try? ProviderInstanceAccountStore.secret(for: instance) {
                 return CursorProvider(tokenLoader: { token })
             }
             return CursorProvider()
@@ -149,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return nil
             })
         case .kimi:
-            if let token = try? ProviderInstanceAccountStore.secret(for: instance), let token {
+            if let token = try? ProviderInstanceAccountStore.secret(for: instance) {
                 return KimiProvider(credentialLoader: {
                     KimiCredential(token: token, isCLI: false, identityHeaders: [:])
                 })
@@ -240,6 +240,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func chooseCredentialFile(_ instance: ProviderInstance, title: String, message: String) {
+        let choice = NSAlert()
+        choice.messageText = title
+        choice.informativeText = message
+        choice.addButton(withTitle: "Choose file…")
+        choice.addButton(withTitle: "Use default")
+        choice.addButton(withTitle: "Cancel")
+
+        let response = choice.runModal()
+        if response == .alertSecondButtonReturn {
+            ProviderInstanceAccountStore.saveCredentialPath("", for: instance.id)
+            coordinator.rebuildProvider(instance.id)
+            Task { await coordinator.refresh(instance.id) }
+            return
+        }
+        guard response == .alertFirstButtonReturn else { return }
+
         let panel = NSOpenPanel()
         panel.title = title
         panel.message = message
@@ -413,6 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Per-instance account configuration
 
+@MainActor
 enum ProviderInstanceAccountStore {
     private static let defaults = UserDefaults.standard
 
