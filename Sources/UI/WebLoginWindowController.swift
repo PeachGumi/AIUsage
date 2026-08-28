@@ -21,16 +21,26 @@ enum LoginSuccessRules {
 @MainActor
 final class WebLoginWindowController: NSObject, NSWindowDelegate {
     private let provider: ProviderID
+    private let accountLabel: String?
     private let startURL: URL
+    private let dataStore: WKWebsiteDataStore
     private let onSuccess: (URL) -> Void
     private var window: NSWindow?
     private var webView: WKWebView?
     private var successTask: Task<Void, Never>?
     private var isCompleting = false
 
-    init(provider: ProviderID, startURL: URL, onSuccess: @escaping (URL) -> Void) {
+    init(
+        provider: ProviderID,
+        accountLabel: String? = nil,
+        startURL: URL,
+        dataStore: WKWebsiteDataStore = .default(),
+        onSuccess: @escaping (URL) -> Void)
+    {
         self.provider = provider
+        self.accountLabel = accountLabel
         self.startURL = startURL
+        self.dataStore = dataStore
         self.onSuccess = onSuccess
     }
 
@@ -44,7 +54,7 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         cancelPendingSuccess()
 
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = dataStore
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 980, height: 760), configuration: configuration)
         webView.navigationDelegate = self
         let window = NSWindow(
@@ -52,7 +62,8 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false)
-        window.title = "Sign in to \(provider.displayName)"
+        let suffix = accountLabel.map { " — \($0)" } ?? ""
+        window.title = "Sign in to \(provider.displayName)\(suffix)"
         window.contentView = webView
         window.delegate = self
         window.center()
