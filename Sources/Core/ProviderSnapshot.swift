@@ -70,13 +70,14 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 
     /// Only these providers have credentials/session state owned by AIUsage.
-    /// External-tool providers deliberately do not expose a misleading Sign
-    /// out action that would imply AIUsage can log out Claude/Cursor/etc.
+    /// Claude, Antigravity, Copilot, Cursor and Kimi reuse external clients'
+    /// existing authentication read-only and therefore are never signed out by
+    /// AIUsage.
     var managesAuthentication: Bool {
         switch self {
-        case .openCodeGo, .qwen, .copilot, .zai:
+        case .openCodeGo, .qwen, .zai:
             true
-        case .codex, .claude, .antigravity, .cursor, .kimi:
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
             false
         }
     }
