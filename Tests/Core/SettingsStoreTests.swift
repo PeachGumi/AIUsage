@@ -29,6 +29,35 @@ final class SettingsStoreTests: XCTestCase {
         }
     }
 
+    func testAddingDuplicateAfterRemovalReusesFreeAutomaticLabelWithoutCollision() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.codex)!
+            let second = store.addProvider(.codex)!
+            _ = store.addProvider(.codex)!
+
+            store.removeProvider(first.id)
+            let replacement = store.addProvider(.codex)!
+
+            XCTAssertEqual(store.instance(second.id)?.accountLabel, "Account 2")
+            XCTAssertEqual(store.instance(replacement.id)?.accountLabel, "Account 1")
+            let labels = store.instances(of: .codex).compactMap(\.accountLabel)
+            XCTAssertEqual(Set(labels).count, labels.count)
+        }
+    }
+
+    func testAutomaticLabelAllocationRespectsUserEnteredAccountNumber() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.cursor)!
+            store.renameProvider(first.id, accountLabel: "Account 2")
+
+            let second = store.addProvider(.cursor)!
+            XCTAssertEqual(store.instance(first.id)?.accountLabel, "Account 2")
+            XCTAssertEqual(store.instance(second.id)?.accountLabel, "Account 1")
+        }
+    }
+
     func testDuplicateAccountsPersistWithSelectionOrderAndLabels() {
         withDefaults { defaults in
             let firstStore = SettingsStore(defaults: defaults)
