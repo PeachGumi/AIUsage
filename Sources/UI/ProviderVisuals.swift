@@ -1,25 +1,48 @@
+import AppKit
 import SwiftUI
 
+struct VisualRGB: Equatable, Sendable {
+    let red: Double
+    let green: Double
+    let blue: Double
+
+    var color: Color {
+        Color(red: red, green: green, blue: blue)
+    }
+
+    var nsColor: NSColor {
+        NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
+    }
+}
+
 enum ProviderVisuals {
-    static func accent(_ provider: ProviderID) -> Color {
+    static func accentRGB(_ provider: ProviderID) -> VisualRGB {
         switch provider {
-        case .openCodeGo: Color(red: 0.05, green: 0.62, blue: 0.66)
-        case .qwen: Color(red: 0.48, green: 0.32, blue: 0.88)
-        case .codex: Color(red: 0.31, green: 0.36, blue: 0.82)
-        case .claude: Color(red: 0.70, green: 0.39, blue: 0.25)
-        case .antigravity: Color(red: 0.18, green: 0.48, blue: 0.86)
-        case .copilot: Color(red: 0.39, green: 0.30, blue: 0.70)
-        case .cursor: Color(red: 0.26, green: 0.26, blue: 0.29)
-        case .zai: Color(red: 0.08, green: 0.55, blue: 0.42)
-        case .kimi: Color(red: 0.78, green: 0.32, blue: 0.58)
+        case .openCodeGo: VisualRGB(red: 0.00, green: 0.42, blue: 0.48)
+        case .qwen: VisualRGB(red: 0.38, green: 0.22, blue: 0.72)
+        case .codex: VisualRGB(red: 0.22, green: 0.27, blue: 0.68)
+        case .claude: VisualRGB(red: 0.61, green: 0.31, blue: 0.18)
+        case .antigravity: VisualRGB(red: 0.12, green: 0.39, blue: 0.74)
+        case .copilot: VisualRGB(red: 0.35, green: 0.25, blue: 0.66)
+        case .cursor: VisualRGB(red: 0.25, green: 0.25, blue: 0.25)
+        case .zai: VisualRGB(red: 0.04, green: 0.46, blue: 0.34)
+        case .kimi: VisualRGB(red: 0.69, green: 0.23, blue: 0.49)
+        }
+    }
+
+    static func accent(_ provider: ProviderID) -> Color {
+        accentRGB(provider).color
+    }
+
+    static func severityRGB(_ severity: UsageSeverity) -> VisualRGB {
+        switch severity {
+        case .healthy: VisualRGB(red: 0.05, green: 0.45, blue: 0.18)
+        case .warning: VisualRGB(red: 0.70, green: 0.42, blue: 0.00)
+        case .critical: VisualRGB(red: 0.75, green: 0.08, blue: 0.08)
         }
     }
 
     static func severity(_ severity: UsageSeverity) -> Color {
-        switch severity {
-        case .healthy: .green
-        case .warning: .orange
-        case .critical: .red
-        }
+        severityRGB(severity).color
     }
 }
