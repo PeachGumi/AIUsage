@@ -42,6 +42,23 @@ final class SettingsStoreTests: XCTestCase {
         }
     }
 
+    func testReAddingProviderRestoresStableDefaultSlotWhileSiblingRemains() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let defaultAccount = store.addProvider(.codex)!
+            let explicitAccount = store.addProvider(.codex)!
+
+            store.removeProvider(defaultAccount.id)
+            XCTAssertEqual(store.instances(of: .codex).map(\.id), [explicitAccount.id])
+
+            let restored = store.addProvider(.codex)!
+            XCTAssertEqual(restored.id, ProviderInstance.legacyID(for: .codex))
+            XCTAssertNotEqual(restored.id, explicitAccount.id)
+            XCTAssertEqual(store.instance(restored.id)?.accountLabel, "Account 1")
+            XCTAssertEqual(store.instance(explicitAccount.id)?.accountLabel, "Account 2")
+        }
+    }
+
     func testAntigravityIsLimitedToOneOfficialLocalSession() {
         withDefaults { defaults in
             let store = SettingsStore(defaults: defaults)
