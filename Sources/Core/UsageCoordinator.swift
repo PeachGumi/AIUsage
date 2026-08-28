@@ -32,63 +32,99 @@ struct ProviderFailure: Error, Equatable, Sendable {
 }
 
 struct ProviderFetchOutcome: Sendable {
-    let provider: ProviderID
+    let instanceID: UUID
     let result: Result<ProviderSnapshot, ProviderFailure>
 }
 
 @MainActor
 final class UsageCoordinator: ObservableObject {
-    @Published private(set) var snapshots: [ProviderID: ProviderSnapshot] = [:]
-    @Published private(set) var errors: [ProviderID: String] = [:]
-    @Published private(set) var refreshing: Set<ProviderID> = []
-    @Published private(set) var authenticationStates: [ProviderID: ProviderAuthenticationState] = [:]
+    @Published private(set) var snapshots: [UUID: ProviderSnapshot] = [:]
+    @Published private(set) var errors: [UUID: String] = [:]
+    @Published private(set) var refreshing: Set<UUID> = []
+    @Published private(set) var authenticationStates: [UUID: ProviderAuthenticationState] = [:]
 
-    private let providers: [ProviderID: any UsageProvider]
-    private var enabledProviderIDs: Set<ProviderID>
-    private var generations: [ProviderID: Int] = [:]
+    private let providerFactory: (ProviderInstance) -> any UsageProvider
+    private var providers: [UUID: any UsageProvider] = [:]
+    private var instances: [UUID: ProviderInstance] = [:]
+    private var enabledInstanceIDs: Set<UUID> = []
+    private var generations: [UUID: Int] = [:]
     private var lastRefreshAllAt: Date?
     private var refreshAllInProgress = false
 
-    /// `enabledProviders == nil` keeps the historical/test behavior of enabling
-    /// every supplied implementation. The app passes the user's explicit
-    /// registrations so a fresh install performs no provider requests.
-    init(providers: [any UsageProvider], enabledProviders: [ProviderID]? = nil) {
-        self.providers = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
-        let implementedIDs = Set(self.providers.keys)
-        if let enabledProviders {
-            enabledProviderIDs = Set(enabledProviders).intersection(implementedIDs)
-        } else {
-            enabledProviderIDs = implementedIDs
-        }
-        authenticationStates = Dictionary(
-            uniqueKeysWithValues: enabledProviderIDs.map { ($0, ProviderAuthenticationState.unknown) })
+    init(
+        instances: [ProviderInstance],
+        providerFactory: @escaping (ProviderInstance) -> any UsageProvider
+    ) {
+        self.providerFactory = providerFactory
+        setEnabledProviders(instances)
     }
 
-    /// Applies the user's current registration set. Removing a provider also
-    /// cancels in-flight work and drops its cached presentation state without
-    /// touching provider credentials/session storage.
-    func setEnabledProviders(_ ids: [ProviderID]) {
-        let next = Set(ids).intersection(Set(providers.keys))
-        let removed = enabledProviderIDs.subtracting(next)
-        let added = next.subtracting(enabledProviderIDs)
+    /// Test/backward-compatible initializer for one runtime per provider type.
+    /// It creates synthetic instance IDs and should not be used by the app.
+    convenience init(providers: [any UsageProvider], enabledProviders: [ProviderID]? = nil) {
+        let allowed = enabledProviders.map(Set.init)
+        let pairs = providers.compactMap { provider -> (ProviderInstance, any UsageProvider)? in
+            if let allowed, !allowed.contains(provider.id) { return nil }
+            return (ProviderInstance(provider: provider.id), provider)
+        }
+        let runtimes = Dictionary(uniqueKeysWithValues: pairs.map { ($0.0.id, $0.1) })
+        self.init(instances: pairs.map(\.0)) { instance in
+            guard let runtime = runtimes[instance.id] else {
+                preconditionFailure("Missing test provider runtime for \(instance.id)")
+            }
+            return runtime
+        }
+    }
+
+    /// Reconciles the live runtime set with the user's account/card instances.
+    /// Removing one duplicate only cancels and clears that UUID; sibling
+    /// instances of the same ProviderID remain completely independent.
+    func setEnabledProviders(_ nextInstances: [ProviderInstance]) {
+        let nextByID = Dictionary(uniqueKeysWithValues: nextInstances.map { ($0.id, $0) })
+        let nextIDs = Set(nextByID.keys)
+        let removed = enabledInstanceIDs.subtracting(nextIDs)
+        let added = nextIDs.subtracting(enabledInstanceIDs)
+        let retained = enabledInstanceIDs.intersection(nextIDs)
+
         for id in removed {
             generations[id, default: 0] += 1
             providers[id]?.cancelActiveFetch()
+            providers.removeValue(forKey: id)
+            instances.removeValue(forKey: id)
             snapshots.removeValue(forKey: id)
             errors.removeValue(forKey: id)
             refreshing.remove(id)
             authenticationStates.removeValue(forKey: id)
         }
+
+        for id in retained {
+            guard let next = nextByID[id] else { continue }
+            // Provider type is immutable for normal instances. Defensively
+            // rebuild if persisted/corrupt state ever changes it for a UUID.
+            if instances[id]?.provider != next.provider {
+                generations[id, default: 0] += 1
+                providers[id]?.cancelActiveFetch()
+                providers[id] = providerFactory(next)
+                snapshots.removeValue(forKey: id)
+                errors.removeValue(forKey: id)
+                refreshing.remove(id)
+                authenticationStates[id] = .unknown
+            }
+            instances[id] = next
+        }
+
         for id in added {
+            guard let instance = nextByID[id] else { continue }
+            instances[id] = instance
+            providers[id] = providerFactory(instance)
             authenticationStates[id] = .unknown
         }
-        enabledProviderIDs = next
+
+        enabledInstanceIDs = nextIDs
     }
 
-    /// Starts every registered provider independently so a slow WebView/network
-    /// provider cannot delay the others. Re-entrant full refresh requests are
-    /// coalesced; individual provider refreshes can still supersede their own
-    /// in-flight request through the generation mechanism below.
+    /// Starts every registered account independently so a slow provider/account
+    /// cannot delay any sibling, including another account of the same service.
     func refreshAll() async {
         guard !refreshAllInProgress else { return }
         refreshAllInProgress = true
@@ -97,7 +133,7 @@ final class UsageCoordinator: ObservableObject {
             lastRefreshAllAt = Date()
         }
 
-        let tasks = enabledProviderIDs.map { id in
+        let tasks = enabledInstanceIDs.map { id in
             Task { @MainActor [weak self] in
                 await self?.refresh(id)
             }
@@ -107,46 +143,55 @@ final class UsageCoordinator: ObservableObject {
         }
     }
 
-    func refresh(_ id: ProviderID) async {
-        guard enabledProviderIDs.contains(id), let provider = providers[id] else { return }
-        generations[id, default: 0] += 1
-        let generation = generations[id]!
-        refreshing.insert(id)
+    func refresh(_ instanceID: UUID) async {
+        guard enabledInstanceIDs.contains(instanceID),
+              let provider = providers[instanceID] else { return }
+        generations[instanceID, default: 0] += 1
+        let generation = generations[instanceID]!
+        refreshing.insert(instanceID)
         provider.cancelActiveFetch()
+
         let outcome: ProviderFetchOutcome
         do {
-            outcome = ProviderFetchOutcome(provider: id, result: .success(try await provider.fetch()))
+            outcome = ProviderFetchOutcome(
+                instanceID: instanceID,
+                result: .success(try await provider.fetch()))
         } catch is CancellationError {
             outcome = ProviderFetchOutcome(
-                provider: id,
+                instanceID: instanceID,
                 result: .failure(ProviderFailure(message: "Cancelled", requiresAuthentication: false)))
         } catch {
             let authError = error as? any ProviderAuthenticationError
             outcome = ProviderFetchOutcome(
-                provider: id,
+                instanceID: instanceID,
                 result: .failure(ProviderFailure(
                     message: error.localizedDescription,
                     requiresAuthentication: authError?.requiresAuthentication == true)))
         }
-        // A newer refresh, provider removal, or sign-out superseded this
-        // request: drop it so stale results never overwrite newer state.
-        guard generations[id] == generation, enabledProviderIDs.contains(id) else { return }
+
+        // A newer refresh, removal, or sign-out superseded this account fetch.
+        guard generations[instanceID] == generation,
+              enabledInstanceIDs.contains(instanceID) else { return }
         apply(outcome)
-        refreshing.remove(id)
+        refreshing.remove(instanceID)
     }
 
-    func provider(_ id: ProviderID) -> (any UsageProvider)? {
-        providers[id]
+    func provider(_ instanceID: UUID) -> (any UsageProvider)? {
+        providers[instanceID]
     }
 
-    func markSignedOut(_ id: ProviderID, message: String) {
-        generations[id, default: 0] += 1
-        providers[id]?.cancelActiveFetch()
-        snapshots.removeValue(forKey: id)
-        errors[id] = message
-        refreshing.remove(id)
-        if enabledProviderIDs.contains(id) {
-            authenticationStates[id] = .required
+    func instance(_ instanceID: UUID) -> ProviderInstance? {
+        instances[instanceID]
+    }
+
+    func markSignedOut(_ instanceID: UUID, message: String) {
+        generations[instanceID, default: 0] += 1
+        providers[instanceID]?.cancelActiveFetch()
+        snapshots.removeValue(forKey: instanceID)
+        errors[instanceID] = message
+        refreshing.remove(instanceID)
+        if enabledInstanceIDs.contains(instanceID) {
+            authenticationStates[instanceID] = .required
         }
     }
 
@@ -159,13 +204,13 @@ final class UsageCoordinator: ObservableObject {
     private func apply(_ outcome: ProviderFetchOutcome) {
         switch outcome.result {
         case let .success(snapshot):
-            snapshots[outcome.provider] = snapshot
-            errors.removeValue(forKey: outcome.provider)
-            authenticationStates[outcome.provider] = .authenticated
+            snapshots[outcome.instanceID] = snapshot
+            errors.removeValue(forKey: outcome.instanceID)
+            authenticationStates[outcome.instanceID] = .authenticated
         case let .failure(error):
-            errors[outcome.provider] = error.message
+            errors[outcome.instanceID] = error.message
             if error.requiresAuthentication {
-                authenticationStates[outcome.provider] = .required
+                authenticationStates[outcome.instanceID] = .required
             }
             // Transient failures intentionally leave the previous auth state
             // untouched. A timeout/429/5xx must not turn a Sign out control into
