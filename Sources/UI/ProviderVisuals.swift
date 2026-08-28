@@ -21,6 +21,12 @@ enum ProviderVisuals {
         case .openCodeGo: VisualRGB(red: 0.00, green: 0.42, blue: 0.48)
         case .qwen: VisualRGB(red: 0.38, green: 0.22, blue: 0.72)
         case .codex: VisualRGB(red: 0.22, green: 0.27, blue: 0.68)
+        case .claude: VisualRGB(red: 0.61, green: 0.31, blue: 0.18)
+        case .antigravity: VisualRGB(red: 0.12, green: 0.39, blue: 0.74)
+        case .copilot: VisualRGB(red: 0.35, green: 0.25, blue: 0.66)
+        case .cursor: VisualRGB(red: 0.25, green: 0.25, blue: 0.25)
+        case .zai: VisualRGB(red: 0.04, green: 0.46, blue: 0.34)
+        case .kimi: VisualRGB(red: 0.69, green: 0.23, blue: 0.49)
         }
     }
 

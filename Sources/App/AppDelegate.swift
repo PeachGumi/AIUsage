@@ -12,16 +12,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try await qwenCookies.header(for: url)
     })
     private lazy var codexProvider = CodexProvider()
+    private lazy var claudeProvider = ClaudeProvider()
+    private lazy var antigravityProvider = AntigravityProvider()
+    private lazy var copilotProvider = CopilotProvider()
+    private lazy var cursorProvider = CursorProvider()
+    private lazy var zaiProvider = ZAIProvider()
+    private lazy var kimiProvider = KimiProvider()
 
     /// Concrete provider implementations live in one registry. The Add
     /// Provider UI exposes ProviderID.implemented, while SettingsStore decides
-    /// which implementations the user has explicitly registered. Future
-    /// providers can be developed without becoming user-visible until promoted
-    /// into that implemented catalog.
+    /// which implementations the user has explicitly registered.
     private lazy var providerImplementations: [any UsageProvider] = [
         codexProvider,
         qwenProvider,
         openCodeProvider,
+        claudeProvider,
+        antigravityProvider,
+        copilotProvider,
+        cursorProvider,
+        zaiProvider,
+        kimiProvider,
     ]
     private lazy var coordinator = UsageCoordinator(
         providers: providerImplementations,
@@ -89,7 +99,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showLogin(_ provider: ProviderID) {
-        guard provider != .codex else { openDashboard(.codex); return }
+        switch provider {
+        case .openCodeGo, .qwen:
+            showWebLogin(provider)
+        case .zai:
+            promptForZAIKey()
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
+            // Authentication for these providers belongs to their official
+            // local client. The card normally hides managed-auth controls, but
+            // this fallback keeps the action safe if called programmatically.
+            openDashboard(provider)
+        }
+    }
+
+    private func showWebLogin(_ provider: ProviderID) {
         if let controller = loginControllers[provider] {
             controller.show()
             return
@@ -106,6 +129,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         loginControllers[provider] = controller
         controller.show()
+    }
+
+    private func promptForZAIKey() {
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        field.placeholderString = "Z_AI_API_KEY"
+        let alert = NSAlert()
+        alert.messageText = "Set Z.AI Coding Plan API key"
+        alert.informativeText = "The key is stored in the macOS Keychain and is sent only to https://api.z.ai for the Coding Plan quota request."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try AIUsageSecretStore.save(field.stringValue, account: ZAIProvider.keychainAccount)
+            Task { await coordinator.refresh(.zai) }
+        } catch {
+            showError(title: "Could not save Z.AI API key", error: error)
+        }
     }
 
     private static func workspaceID(from url: URL) -> String? {
@@ -127,7 +168,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             workspaceStore.clear()
             await removeWebsiteData(matching: ["opencode.ai"])
             coordinator.markSignedOut(.openCodeGo, message: "OpenCode login is required.")
-        case .codex:
+        case .zai:
+            try? AIUsageSecretStore.delete(account: ZAIProvider.keychainAccount)
+            coordinator.markSignedOut(.zai, message: "Z.AI API key is required.")
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
+            // External-client credentials are read-only from AIUsage's point of
+            // view and must never be deleted by an AIUsage Sign out action.
             break
         }
     }
@@ -138,17 +184,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func loginURL(_ provider: ProviderID) -> URL {
         switch provider {
-        case .openCodeGo: URL(string: "https://opencode.ai/auth")!
-        case .qwen: dashboardURL(.qwen)
-        case .codex: dashboardURL(.codex)
+        case .openCodeGo:
+            URL(string: "https://opencode.ai/auth")!
+        case .qwen:
+            dashboardURL(.qwen)
+        case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
+            dashboardURL(provider)
         }
     }
 
     private func dashboardURL(_ provider: ProviderID) -> URL {
         switch provider {
-        case .openCodeGo: workspaceStore.usageURL
-        case .qwen: URL(string: "https://home.qwencloud.com/billing/subscription/token-plan-individual")!
-        case .codex: URL(string: "https://chatgpt.com/codex/settings/usage")!
+        case .openCodeGo:
+            workspaceStore.usageURL
+        case .qwen:
+            URL(string: "https://home.qwencloud.com/billing/subscription/token-plan-individual")!
+        case .codex:
+            URL(string: "https://chatgpt.com/codex/settings/usage")!
+        case .claude:
+            URL(string: "https://claude.ai/settings/usage")!
+        case .antigravity:
+            URL(string: "https://antigravity.google")!
+        case .copilot:
+            URL(string: "https://github.com/settings/billing")!
+        case .cursor:
+            URL(string: "https://cursor.com/dashboard?tab=usage")!
+        case .zai:
+            URL(string: "https://z.ai/manage-apikey/coding-plan/personal/my-plan")!
+        case .kimi:
+            URL(string: "https://www.kimi.com/code/console")!
         }
     }
 
@@ -173,5 +237,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         await withCheckedContinuation { continuation in
             store.removeData(ofTypes: types, for: matched) { continuation.resume() }
         }
+    }
+
+    private func showError(title: String, error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.runModal()
     }
 }

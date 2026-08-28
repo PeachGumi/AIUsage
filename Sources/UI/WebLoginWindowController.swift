@@ -11,11 +11,8 @@ enum LoginSuccessRules {
             return path == "/console" || path.hasPrefix("/console/") ||
                 path.range(of: #"^/workspace/wrk_[A-Za-z0-9_-]+(?:/go)?/?$"#, options: .regularExpression) != nil
         case .qwen:
-            // The login starts from this billing area; require returning to it
-            // rather than treating an arbitrary public home/error page as proof
-            // that an authenticated Qwen session exists.
             return url.host == "home.qwencloud.com" && url.path.hasPrefix("/billing/")
-        case .codex:
+        case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
             return false
         }
     }
@@ -44,9 +41,6 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        // A controller is retained per provider and may be reused after a
-        // successful sign-in or manual close. Reset one-shot state before each
-        // new browser session so subsequent sign-ins can complete normally.
         cancelPendingSuccess()
 
         let configuration = WKWebViewConfiguration()
@@ -77,9 +71,6 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         webView = nil
     }
 
-    /// Only provider account hosts and their OAuth endpoints may load inside
-    /// the sign-in window. Unexpected destinations are blocked rather than
-    /// inheriting authenticated browser state.
     private func navigationPolicy(for url: URL) -> WKNavigationActionPolicy {
         guard url.scheme == "https" else { return .cancel }
         switch provider {
@@ -88,17 +79,13 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         case .qwen:
             return ["home.qwencloud.com", "cs-data.qwencloud.com", "passport.qwencloud.com",
                     "qwencloud.com", "qianwenai.com"].contains(url.host) ? .allow : .cancel
-        case .codex:
+        case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
             return .cancel
         }
     }
 
     private func handlePossibleSuccess(url: URL) {
         guard LoginSuccessRules.isSuccess(provider: provider, url: url) else {
-            // A dashboard can finish loading briefly before its client-side auth
-            // redirect. If that redirect reaches a login page within the grace
-            // period, invalidate the earlier success candidate instead of
-            // closing the window as if authentication had succeeded.
             cancelPendingSuccess()
             return
         }

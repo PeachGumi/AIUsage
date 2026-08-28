@@ -12,11 +12,21 @@ final class ProviderVisualsTests: XCTestCase {
     }
 
     func testProviderPaletteUsesConsistentMutedBrightness() {
-        XCTAssertEqual(ProviderVisuals.accentRGB(.openCodeGo),
-                       VisualRGB(red: 0.00, green: 0.42, blue: 0.48))
-        XCTAssertEqual(ProviderVisuals.accentRGB(.qwen),
-                       VisualRGB(red: 0.38, green: 0.22, blue: 0.72))
-        XCTAssertEqual(ProviderVisuals.accentRGB(.codex),
-                       VisualRGB(red: 0.22, green: 0.27, blue: 0.68))
+        let expected: [ProviderID: VisualRGB] = [
+            .openCodeGo: VisualRGB(red: 0.00, green: 0.42, blue: 0.48),
+            .qwen: VisualRGB(red: 0.38, green: 0.22, blue: 0.72),
+            .codex: VisualRGB(red: 0.22, green: 0.27, blue: 0.68),
+            .claude: VisualRGB(red: 0.61, green: 0.31, blue: 0.18),
+            .antigravity: VisualRGB(red: 0.12, green: 0.39, blue: 0.74),
+            .copilot: VisualRGB(red: 0.35, green: 0.25, blue: 0.66),
+            .cursor: VisualRGB(red: 0.25, green: 0.25, blue: 0.25),
+            .zai: VisualRGB(red: 0.04, green: 0.46, blue: 0.34),
+            .kimi: VisualRGB(red: 0.69, green: 0.23, blue: 0.49),
+        ]
+
+        XCTAssertEqual(Set(expected.keys), Set(ProviderID.implemented))
+        for (provider, rgb) in expected {
+            XCTAssertEqual(ProviderVisuals.accentRGB(provider), rgb, provider.displayName)
+        }
     }
 }

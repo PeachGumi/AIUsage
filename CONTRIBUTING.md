@@ -61,12 +61,12 @@ Version/BuildはXcode build settingの`MARKETING_VERSION` / `CURRENT_PROJECT_VER
 
 対応可能なProviderと、ユーザーが実際に登録したProviderは別概念です。
 
-- `ProviderID.implemented` が **+ メニューへ公開してよい実装済みProvider** のカタログです。
+- `ProviderID.implemented` が **+ メニューへ公開するProvider** のカタログです。実アカウント未検証の実装を公開する場合は`isExperimental`を必ず有効にし、UIとREADMEで明示します。
 - `SettingsStore.registeredProviders` はユーザーが明示的に追加したProviderだけを保持します。
 - `UsageCoordinator`は登録済みProviderだけを起動時・定期・手動の全更新対象にします。
 - Removeは表示/更新対象から外す操作で、認証情報の削除とは分離します。
 
-将来のProviderを試作する際は、IDや実装コードが存在していても、テストと失敗時挙動が整うまでは`ProviderID.implemented`へ追加しないでください。これにより未完成Providerを一般ユーザーへ露出させずに開発できます。
+将来のProviderを試作する際は、IDや実装コードが存在していても、fixtureテスト、認証境界、fail-closedの失敗時挙動が整うまでは`ProviderID.implemented`へ追加しないでください。実アカウント検証前に公開する必要がある場合はExperimental扱いとし、公式dashboardとの照合結果やサニタイズ済み修正PRを募集してください。
 
 ## Providerを追加・変更するとき
 
@@ -78,7 +78,7 @@ Version/BuildはXcode build settingの`MARKETING_VERSION` / `CURRENT_PROJECT_VER
 4. 必要ならログインURL、dashboard URL、WebKit navigation許可範囲、Sign out動作、表示色を追加する。
 5. parser/transport/authのfixtureテストを追加する。
 6. 認証切れを表すProviderエラーでは`ProviderAuthenticationError`を実装し、通常のtimeout/429/5xxと認証要求を区別する。
-7. 実アカウントで挙動を確認したあと、最後に`ProviderID.implemented`へ追加する。
+7. 実アカウントで挙動を確認したあと、最後に`ProviderID.implemented`へ追加する。未検証のまま公開する場合は`isExperimental`、README、Issue Formを同時に更新する。
 
 通信・認証・解析はProviderディレクトリへ閉じ込め、1サービスの失敗が他サービスへ波及しない設計を維持してください。また、次を満たすようにしてください。
 

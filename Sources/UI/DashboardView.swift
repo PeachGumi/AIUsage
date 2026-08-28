@@ -218,7 +218,9 @@ struct DashboardView: View {
                     .disabled(true)
             } else {
                 ForEach(settings.addableProviders) { provider in
-                    Button(provider.displayName) {
+                    Button(provider.isExperimental
+                           ? "\(provider.displayName) — Experimental"
+                           : provider.displayName) {
                         actions.addProvider(provider)
                     }
                 }
@@ -347,7 +349,8 @@ private struct ProviderCard: View {
         } else {
             status = "available"
         }
-        return "\(provider.displayName), \(status)\(isSelected ? ", shown in menu bar" : "")"
+        let experimental = provider.isExperimental ? ", experimental integration" : ""
+        return "\(provider.displayName), \(status)\(experimental)\(isSelected ? ", shown in menu bar" : "")"
     }
 
     private var cardHeader: some View {
@@ -376,9 +379,18 @@ private struct ProviderCard: View {
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 24)
                 .background(ProviderVisuals.accent(provider), in: RoundedRectangle(cornerRadius: 6))
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(provider.displayName).font(.subheadline.weight(.semibold))
-                if let plan = snapshot?.planName { Text(plan).font(.caption2).foregroundStyle(.secondary) }
+                HStack(spacing: 6) {
+                    if provider.isExperimental {
+                        Label("Experimental", systemImage: "flask")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                    if let plan = snapshot?.planName {
+                        Text(plan).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
             }
             if isSelected {
                 Label("Menu bar", systemImage: "menubar.rectangle")
@@ -415,7 +427,9 @@ private struct ProviderCard: View {
 
     @ViewBuilder
     private var authenticationAction: some View {
-        if provider != .codex {
+        if provider == .zai {
+            Button("API key…") { actions.login(provider) }.buttonStyle(.link)
+        } else if provider.managesAuthentication {
             switch authenticationState {
             case .authenticated:
                 Button("Sign out") { actions.logout(provider) }.buttonStyle(.link)
