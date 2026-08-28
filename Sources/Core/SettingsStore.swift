@@ -71,7 +71,6 @@ final class SettingsStore: ObservableObject {
     func addProvider(_ provider: ProviderID) -> ProviderInstance? {
         guard ProviderID.implemented.contains(provider) else { return nil }
         let matching = registeredProviders.indices.filter { registeredProviders[$0].provider == provider }
-        let ordinal = matching.count + 1
 
         // Keep a single account visually clean. As soon as a second account is
         // added, give the original a deterministic local label so two identical
@@ -82,9 +81,23 @@ final class SettingsStore: ObservableObject {
             registeredProviders[first] = registeredProviders[first].withAccountLabel("Account 1")
         }
 
-        let instance = ProviderInstance(
-            provider: provider,
-            accountLabel: matching.isEmpty ? nil : "Account \(ordinal)")
+        let label: String?
+        if matching.isEmpty {
+            label = nil
+        } else {
+            // Count-based numbering can collide after a card is removed. Reuse
+            // the lowest free automatic ordinal instead, while respecting both
+            // generated labels and a user-entered label such as "Account 2".
+            let usedOrdinals = Set(
+                registeredProviders
+                    .filter { $0.provider == provider }
+                    .compactMap { Self.automaticAccountOrdinal($0.accountLabel) })
+            var ordinal = 1
+            while usedOrdinals.contains(ordinal) { ordinal += 1 }
+            label = "Account \(ordinal)"
+        }
+
+        let instance = ProviderInstance(provider: provider, accountLabel: label)
         registeredProviders.append(instance)
         if selectedProviderInstanceID == nil { selectedProviderInstanceID = instance.id }
         return instance
@@ -145,6 +158,15 @@ final class SettingsStore: ObservableObject {
         let implemented = Set(ProviderID.implemented)
         var seen = Set<UUID>()
         return instances.filter { implemented.contains($0.provider) && seen.insert($0.id).inserted }
+    }
+
+    private static func automaticAccountOrdinal(_ label: String?) -> Int? {
+        guard let label,
+              label.hasPrefix("Account "),
+              let ordinal = Int(label.dropFirst("Account ".count)),
+              ordinal > 0,
+              label == "Account \(ordinal)" else { return nil }
+        return ordinal
     }
 
     private static func legacyProviderIDs(from defaults: UserDefaults) -> [ProviderID]? {
