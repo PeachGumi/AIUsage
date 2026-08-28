@@ -2,62 +2,64 @@
 
 AIUsageはローカルで動作するmacOSメニューバーアプリです。分析SDK、広告SDK、クラッシュ収集サービス、独自サーバーは使用しません。
 
-AIUsageは初回起動時にProviderを自動登録しません。ユーザーがPopoverの **+** から明示的に追加したProviderアカウントだけが、起動時・定期更新・手動更新のusage取得対象になります。同じProviderを複数回追加した場合も、各カードは固有のUUIDを持つ独立したアカウントスロットとして扱います。
+初回起動時にProviderを自動登録しません。ユーザーがPopoverの **+** から明示的に追加したカードだけが、起動時・定期更新・手動更新の対象です。
+
+## アカウント分離
+
+各カードは`ProviderInstance` UUIDで識別します。snapshot、error、refresh state、authentication state、表示順、メニューバー選択はUUID単位で分離します。
+
+各Providerの最初のカードはstable default slotです。このカードだけが、必要に応じて外部CLI / アプリの通常のambient credentialを利用できます。追加カードは兄弟カードのambient credentialへ黙ってfallbackせず、カード専用credentialが必要です。
+
+Antigravityは現在1枚だけ登録できます。AIUsageはAntigravity用Google OAuth tokenを作成・保存せず、Googleのremote quota endpointへ直接アクセスしません。
 
 ## ローカルで扱う情報
 
-- OpenCode Go: アカウントごとのWKWebViewログインセッションとworkspace ID。旧バージョンから移行した最初のカードだけは既存のdefault WebKit profileを継承します。
-- Qwen Cloud: アカウントごとのWKWebView Cookie。旧バージョンから移行した最初のカードだけは既存profileと旧QwenUsageの一度限りのCookie移行経路を利用できます。
-- OpenAI Codex: 通常は`~/.codex/auth.json`内の既存OAuth認証を読み取り専用で利用します。別アカウント用カードでは、ユーザーが選択した別の`auth.json`へのパスをローカル設定へ保存できます。
-- Claude: 通常はClaude Codeの既存認証情報を読み取り専用で利用します。別アカウント用カードでは、ユーザーが選択したcredential fileへのパスをローカル設定へ保存できます。
-- Antigravity: 新規アカウントカードではGoogle OAuthのaccess token / refresh tokenなどをカードUUIDごとにmacOS Keychainへ保存します。旧バージョンから移行した最初のカードは、専用OAuthを接続するまでは従来のローカルAntigravityセッションを利用できます。
-- GitHub Copilot: 通常は`GH_TOKEN` / `GITHUB_TOKEN`またはGitHub CLIの既存tokenを利用します。カード固有tokenを設定した場合はmacOS Keychainへ保存します。
-- Cursor: 通常はCursor.appの既存認証情報を読み取り専用で利用します。カード固有tokenを設定した場合はmacOS Keychainへ保存します。
-- Z.AI: カードUUIDごとのCoding Plan API keyをmacOS Keychainへ保存します。旧バージョンから移行した最初のカードでは既存のlegacy keyも互換用途で利用できます。
-- Kimi Code: 通常はKimi Code CLI認証または環境変数を利用します。カード固有API keyを設定した場合はmacOS Keychainへ保存します。
-- 表示設定: 登録アカウント、カードUUID、任意のローカル表示名、選択中カード、並び順、残量／使用量の選択。
+- **OpenCode Go** — カードごとのWKWebView login sessionとworkspace ID。default cardは旧GoUsage workspace IDの一度限りの移行元を利用できます。
+- **Qwen Cloud** — カードごとのWKWebView Cookie。default cardは旧QwenUsage Cookieの一度限りの移行元を利用できます。
+- **OpenAI Codex** — default cardは通常のCodex OAuth credentialを読み取り専用で利用します。追加カードではユーザーが選択した別`auth.json`へのpathだけをAIUsage設定へ保存します。
+- **Claude** — default cardは通常のClaude Code credentialを読み取り専用で利用します。追加カードでは選択したcredential fileへのpathだけを保存します。
+- **Antigravity** — 実行中の公式Antigravity local processを検出し、localhost上のusage interfaceへ問い合わせます。Google OAuth credentialはAIUsageへ保存しません。
+- **GitHub Copilot** — default cardは`GH_TOKEN` / `GITHUB_TOKEN` / GitHub CLI loginを利用できます。追加カードのtokenはUUID別にmacOS Keychainへ保存します。
+- **Cursor** — default cardはCursor.appの既存loginを読み取り専用で利用できます。追加カードのtokenはUUID別にmacOS Keychainへ保存します。
+- **Z.AI** — UUID別Coding Plan API keyをmacOS Keychainへ保存します。default cardは旧AIUsage key / environmentを互換利用できます。
+- **Kimi Code** — default cardはKimi Code CLI / environmentを利用できます。追加カードのAPI keyはUUID別にmacOS Keychainへ保存します。
+- **表示設定** — 登録カード、UUID、任意のローカル表示名、選択中カード、並び順、Remaining / Used設定。
 
-認証情報は対象Providerの公式Webサイト、OAuth endpoint、usage endpointへの通信にだけ使用します。AIUsage独自のサーバーへ送信されることはありません。
+## 保存先
 
-## ProviderのRemoveとSign out
+- 非秘密設定、credential file path、OpenCode workspace ID: `UserDefaults`
+- OpenCode / Qwen Web login: macOS WebKit persistent data store
+- AIUsage所有API key / token: macOS Keychain
+- 外部CLI / アプリのcredential file / DB / Keychain item: 読み取り専用。AIUsageから変更しません
 
-**Remove** は、そのカードをAIUsageの表示・更新対象から外し、そのUUIDにだけ属するAIUsage所有データを削除する操作です。
+AIUsageは新しいQwen Cookieの平文コピーを作成しません。旧QwenUsageの平文Cookieはdefault cardの一度限りの移行用途だけに限定し、AIUsageで新しいloginが成功した後やSign out後は再利用しません。
 
-- UUID別のKeychain credential / Antigravity OAuth credentialを削除します。
-- Codex / Claudeで選択したUUID別credential file pathを削除します。参照先のファイル自体は削除・変更しません。
-- 新規作成したOpenCode / Qwenカードでは、そのカード専用WebKitデータとworkspace情報を削除します。
-- 旧バージョンから移行した最初のカードが共有するlegacy WebKit profileや外部クライアントの認証状態は、破壊的な移行を避けるためRemoveでは削除しません。
-- Codex CLI、Claude Code、GitHub CLI、Cursor.app、Kimi Codeなど、外部クライアント側が所有する認証情報は削除しません。
+## Remove / Sign out
 
-**Sign out / Disconnect** は、対応しているProviderについて現在のカードのAIUsage所有認証状態を明示的に切断する操作です。外部クライアントの認証まで消したい場合は、各公式クライアント側でログアウトしてください。
+**Remove** はカードを一覧から外すだけでなく、そのUUIDに属するAIUsage所有データを削除します。
 
-## 保存
+- UUID別Keychain secretを削除
+- UUID別credential file pathを削除（参照先ファイル本体は削除・変更しない）
+- 新規OpenCode / Qwenカードの専用WebKit data / workspace情報を削除
+- in-flight取得を無効化し、削除後に古い結果が戻らないようにする
 
-- Provider一覧、カードUUID、ラベル、並び順、選択中カード、credential file pathなどの非秘密設定は`UserDefaults`へ保存します。
-- OpenCode workspace IDはカードごとのnamespaceで`UserDefaults`へ保存します。
-- OpenCodeとQwenのWebログイン情報はmacOS WebKitのpersistent data storeでカードごとに分離します。
-- AIUsageはQwen Cookieの平文コピーを新規作成しません。
-- 旧QwenUsageの平文Cookieは、移行済み最初のQwenカードについて`https://home.qwencloud.com`への一度限りの移行用途に限定します。AIUsageで新しいQwenログインが成功した後、またはSign out後は再利用しません。
-- 旧GoUsageのworkspace IDも、移行済み最初のOpenCodeカードについて一度限りの移行元として扱います。
-- AIUsage所有のAPI key、カード固有token、Antigravity OAuth tokenはmacOS Keychainへ保存します。
-- 外部クライアントのcredential fileや認証DBを利用する場合、それらは読み取り専用で扱い、AIUsageから変更しません。
+旧バージョンから移行したdefault WebKit profileや、Codex CLI / Claude Code / GitHub CLI / Cursor.app / Kimi Code / Antigravityなど外部クライアント所有credentialは削除しません。
 
-## ログ
-
-OAuth access token / refresh token、Cookie、API key、アカウントID、workspace ID、実APIレスポンス本文、実使用率をアプリのログへ出力しません。
+対応Providerの **Sign out** は現在のカードについてAIUsageが所有するWeb login / API keyだけを削除します。外部クライアントそのものからlogoutしたい場合は公式クライアント側で操作してください。
 
 ## 通信
 
-- 登録されていないProviderへusage取得通信を開始しません。
-- 同一Providerを複数登録していても、カードごとの認証情報・snapshot・error・refresh stateをUUIDで分離します。
-- ProviderカードをRemoveするとin-flight取得を無効化し、古い結果が画面へ復活しないようにします。
-- 資格情報付きProviderリクエストはHTTPリダイレクトを拒否します。
-- URLSessionはephemeral設定を使い、共有Cookie・資格情報・URLキャッシュを無効化します。
-- Qwen Cookieは送信先のscheme/domain/path/expiryを確認し、旧Cookie移行フォールバックは`home.qwencloud.com`以外へ送信しません。
-- Antigravityの新規カードは、そのカード専用Google OAuth tokenでGoogleのquota endpointへ問い合わせます。専用credentialがない新規カードが別カードのambient Antigravityセッションへ黙ってフォールバックすることはありません。
+- 未登録Providerへusage取得通信を開始しません。
+- URLSessionによるProvider HTTP通信はephemeral設定を基本とし、共有Cookie / URL cache / credential storageを使いません。
+- credential付きHTTP redirectは拒否します。
+- Qwen CookieはHTTPS・domain・path・expiryを確認してから明示headerを構築します。
+- Antigravityはremote Google OAuth経路を持たず、現在はlocal process integrationだけです。
+- duplicate cardのcredentialが未設定・読み取り失敗の場合、default cardのcredentialへfallbackせず認証エラーとしてfail closedします。
+
+## ログ
+
+OAuth token、API key、Cookie、Cookie header、account ID、workspace ID、実APIレスポンス本文、実使用率をアプリログへ出力しません。
 
 ## データ削除
 
-カードの **Remove** で、そのUUIDに属するAIUsage所有credential・設定・専用Webセッションを削除できます。対応Providerでは **Sign out / Disconnect** でも現在のカードのAIUsage所有認証を削除できます。
-
-AIUsageは外部クライアントが所有する認証ファイル・認証DB・Keychain項目を削除しません。また、旧バージョンから移行した共有profileについては、他の既存利用を壊さないため破壊的な自動削除を行いません。
+カードの **Remove** で、そのUUIDに属するAIUsage所有credential / setting / dedicated Web sessionを削除できます。外部クライアント所有データと共有legacy profileは破壊的に自動削除しません。
