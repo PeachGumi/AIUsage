@@ -71,8 +71,8 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     /// Only these providers have credentials/session state owned by AIUsage.
     /// Claude, Antigravity, Copilot, Cursor and Kimi reuse external clients'
-    /// existing authentication read-only and therefore are never signed out by
-    /// AIUsage.
+    /// existing authentication read-only by default and therefore are never
+    /// signed out by AIUsage unless an instance-specific override is configured.
     var managesAuthentication: Bool {
         switch self {
         case .openCodeGo, .qwen, .zai:
@@ -80,6 +80,36 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
             false
         }
+    }
+}
+
+/// One dashboard/account slot. ProviderID identifies the integration type;
+/// ProviderInstance.id identifies one independently managed account/card.
+/// Multiple instances of the same provider are intentionally valid.
+struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
+    let id: UUID
+    let provider: ProviderID
+    var accountLabel: String?
+
+    init(id: UUID = UUID(), provider: ProviderID, accountLabel: String? = nil) {
+        self.id = id
+        self.provider = provider
+        self.accountLabel = Self.cleanedLabel(accountLabel)
+    }
+
+    var title: String {
+        guard let accountLabel else { return provider.displayName }
+        return "\(provider.displayName) · \(accountLabel)"
+    }
+
+    func withAccountLabel(_ value: String?) -> ProviderInstance {
+        ProviderInstance(id: id, provider: provider, accountLabel: value)
+    }
+
+    private static func cleanedLabel(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(80))
     }
 }
 
