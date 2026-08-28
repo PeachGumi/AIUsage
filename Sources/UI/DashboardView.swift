@@ -437,7 +437,7 @@ private struct ProviderCard: View {
             Button("Remove") { actions.removeProvider(instance.id) }
                 .buttonStyle(.link)
                 .foregroundStyle(.red)
-                .help("Remove this account from AIUsage without signing out")
+                .help("Remove this account and its AIUsage-owned account data")
         }
         .font(.caption)
     }
