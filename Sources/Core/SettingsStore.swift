@@ -17,9 +17,6 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(metric.rawValue, forKey: Keys.metric) }
     }
 
-    /// Explicitly registered account/card instances in dashboard order.
-    /// ProviderID is no longer the identity of a card: duplicate providers are
-    /// valid and each instance owns an independent UUID/account slot.
     @Published private(set) var registeredProviders: [ProviderInstance] {
         didSet { persistInstances() }
     }
@@ -33,7 +30,7 @@ final class SettingsStore: ObservableObject {
         let migratedInstances: [ProviderInstance]?
         if storedInstances == nil {
             migratedInstances = Self.legacyProviderIDs(from: defaults)?.map {
-                ProviderInstance(provider: $0)
+                ProviderInstance(id: ProviderInstance.legacyID(for: $0), provider: $0)
             }
         } else {
             migratedInstances = nil
@@ -53,9 +50,6 @@ final class SettingsStore: ObservableObject {
             selectedProviderInstanceID = registeredProviders.first?.id
         }
 
-        // Persist the new representation exactly once after migration. An
-        // explicitly stored empty new array remains empty and never resurrects
-        // old providerOrder/menuBarProvider values.
         if storedInstances == nil, migratedInstances != nil {
             persistInstances()
             if let selectedProviderInstanceID {
@@ -64,8 +58,6 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Every implemented provider is always addable. Adding the same ProviderID
-    /// repeatedly intentionally creates independent account/card instances.
     var addableProviders: [ProviderID] { ProviderID.implemented }
 
     var selectedProvider: ProviderInstance? {
@@ -103,16 +95,12 @@ final class SettingsStore: ObservableObject {
         registeredProviders.filter { $0.provider == provider }
     }
 
-    /// Reorders registered cards for a drag from `from` offsets to `to`
-    /// (List/ForEach move semantics).
     func moveProvider(from: IndexSet, to: Int) {
         var providers = registeredProviders
         providers.move(fromOffsets: from, toOffset: to)
         registeredProviders = providers
     }
 
-    /// Moves a dragged provider instance onto the visual position of another
-    /// card. `Array.move` uses an insertion offset, so forward moves need +1.
     func moveProvider(fromIndex source: Int, ontoIndex target: Int) {
         guard registeredProviders.indices.contains(source),
               registeredProviders.indices.contains(target),
@@ -121,7 +109,6 @@ final class SettingsStore: ObservableObject {
         moveProvider(from: IndexSet(integer: source), to: destination)
     }
 
-    /// Identity-based variant used while cards continuously move under a drag.
     func moveProvider(_ source: UUID, onto target: UUID) {
         guard let sourceIndex = registeredProviders.firstIndex(where: { $0.id == source }),
               let targetIndex = registeredProviders.firstIndex(where: { $0.id == target }) else { return }
@@ -135,22 +122,15 @@ final class SettingsStore: ObservableObject {
 
     private static func loadInstances(defaults: UserDefaults) -> [ProviderInstance]? {
         guard let data = defaults.data(forKey: Keys.providerInstances) else { return nil }
-        // A corrupt new-format value is treated as an explicit empty value,
-        // never as permission to resurrect potentially stale legacy accounts.
         return (try? JSONDecoder().decode([ProviderInstance].self, from: data)) ?? []
     }
 
-    /// Keep implemented types and unique instance UUIDs. Duplicate ProviderIDs
-    /// are deliberately preserved because they represent different accounts.
     private static func sanitized(_ instances: [ProviderInstance]) -> [ProviderInstance] {
         let implemented = Set(ProviderID.implemented)
         var seen = Set<UUID>()
         return instances.filter { implemented.contains($0.provider) && seen.insert($0.id).inserted }
     }
 
-    /// Migration chain for builds that represented one card by ProviderID.
-    /// Prefer the latest registeredProviders key, then the older providerOrder,
-    /// then the old menuBarProvider selection as evidence of prior registration.
     private static func legacyProviderIDs(from defaults: UserDefaults) -> [ProviderID]? {
         if let registrations = defaults.stringArray(forKey: Keys.legacyRegisteredProviders) {
             return Self.sanitizedLegacyIDs(registrations)
@@ -177,8 +157,6 @@ final class SettingsStore: ObservableObject {
         static let selectedInstanceID = "menuBarProviderInstanceID"
         static let metric = "usageMetric"
         static let providerInstances = "providerInstances.v1"
-
-        // Legacy single-instance-per-provider keys.
         static let legacyRegisteredProviders = "registeredProviders"
         static let legacyProviderOrder = "providerOrder"
         static let legacySelectedProvider = "menuBarProvider"
