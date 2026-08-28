@@ -3,22 +3,34 @@ import Foundation
 final class OpenCodeWorkspaceStore {
     private(set) var workspaceID: String?
     private let defaults: UserDefaults
+    private let workspaceKey: String
+    private let ignoreLegacyKey: String
+    private let allowsLegacyMigration: Bool
 
-    init(defaults: UserDefaults = .standard, legacyURL: URL? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        legacyURL: URL? = nil,
+        namespace: String = "default",
+        allowsLegacyMigration: Bool = true)
+    {
         self.defaults = defaults
-        let stored = Self.valid(defaults.string(forKey: Keys.workspaceID))
+        self.workspaceKey = "opencode.\(namespace).workspaceID"
+        self.ignoreLegacyKey = "opencode.\(namespace).ignoreLegacyWorkspaceID"
+        self.allowsLegacyMigration = allowsLegacyMigration
+
+        let stored = Self.valid(defaults.string(forKey: workspaceKey))
         let legacy = legacyURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/GoUsage/workspace_id.txt")
-        let migrated = defaults.bool(forKey: Keys.ignoreLegacy) ? nil : Self.readLegacy(legacy)
+        let migrated = allowsLegacyMigration && !defaults.bool(forKey: ignoreLegacyKey)
+            ? Self.readLegacy(legacy)
+            : nil
 
         workspaceID = stored ?? migrated
         if let workspaceID {
-            defaults.set(workspaceID, forKey: Keys.workspaceID)
+            defaults.set(workspaceID, forKey: workspaceKey)
         }
         if migrated != nil {
-            // Migration is intentionally one-shot. A later sign-out must not
-            // resurrect an old GoUsage workspace on the next app launch.
-            defaults.set(true, forKey: Keys.ignoreLegacy)
+            defaults.set(true, forKey: ignoreLegacyKey)
         }
     }
 
@@ -30,14 +42,14 @@ final class OpenCodeWorkspaceStore {
     func save(_ candidate: String) {
         guard let value = Self.valid(candidate) else { return }
         workspaceID = value
-        defaults.set(value, forKey: Keys.workspaceID)
-        defaults.set(true, forKey: Keys.ignoreLegacy)
+        defaults.set(value, forKey: workspaceKey)
+        defaults.set(true, forKey: ignoreLegacyKey)
     }
 
     func clear() {
         workspaceID = nil
-        defaults.removeObject(forKey: Keys.workspaceID)
-        defaults.set(true, forKey: Keys.ignoreLegacy)
+        defaults.removeObject(forKey: workspaceKey)
+        defaults.set(true, forKey: ignoreLegacyKey)
     }
 
     private static func readLegacy(_ url: URL) -> String? {
@@ -50,10 +62,5 @@ final class OpenCodeWorkspaceStore {
               candidate.range(of: #"^wrk_[A-Za-z0-9_\-]{3,128}$"#, options: .regularExpression) != nil
         else { return nil }
         return candidate
-    }
-
-    private enum Keys {
-        static let workspaceID = "opencode.workspaceID"
-        static let ignoreLegacy = "opencode.ignoreLegacyWorkspaceID"
     }
 }
