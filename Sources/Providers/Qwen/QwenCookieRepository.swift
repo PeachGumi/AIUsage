@@ -1,31 +1,37 @@
 import Foundation
 import WebKit
 
-/// Serves browser-equivalent Cookie headers per destination URL: WebKit's own
-/// store is the source of truth, while this repository applies conservative
-/// destination checks before constructing an explicit Cookie header.
+/// Serves browser-equivalent Cookie headers per destination URL. Each provider
+/// instance receives its own persistent WKWebsiteDataStore, so two Qwen cards
+/// can remain signed into different accounts simultaneously.
 @MainActor
 final class QwenCookieRepository {
     static let shared = QwenCookieRepository()
 
-    private let dataStore: WKWebsiteDataStore
+    let dataStore: WKWebsiteDataStore
     private let defaults: UserDefaults
     private let legacyURL: URL
+    private let ignoreLegacyKey: String
+    private let allowsLegacyMigration: Bool
 
     init(
         dataStore: WKWebsiteDataStore = .default(),
         defaults: UserDefaults = .standard,
-        legacyURL: URL? = nil)
+        legacyURL: URL? = nil,
+        namespace: String = "default",
+        allowsLegacyMigration: Bool = true)
     {
         self.dataStore = dataStore
         self.defaults = defaults
         self.legacyURL = legacyURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/QwenUsage/saved_cookies.txt")
+        self.ignoreLegacyKey = "qwen.\(namespace).ignoreLegacyCookie"
+        self.allowsLegacyMigration = allowsLegacyMigration
     }
 
-    /// Cookie header for `url`. A legacy QwenUsage cookie file is used only as
-    /// a one-time migration fallback and is permanently ignored once AIUsage
-    /// has completed its own Qwen web login or the user signs out.
+    /// Cookie header for `url`. Legacy QwenUsage cookie import is allowed only
+    /// for the migration/default profile. New account instances never inherit a
+    /// plaintext legacy cookie, which would collapse them onto the same account.
     func header(for url: URL) async throws -> String {
         let cookies = await cookies(matching: url)
         let header = cookies
@@ -34,7 +40,9 @@ final class QwenCookieRepository {
             .joined(separator: "; ")
         if !header.isEmpty { return header }
 
-        guard Self.isLegacyCompatible(url), !defaults.bool(forKey: Keys.ignoreLegacy),
+        guard allowsLegacyMigration,
+              Self.isLegacyCompatible(url),
+              !defaults.bool(forKey: ignoreLegacyKey),
               let legacy = try? String(contentsOf: legacyURL, encoding: .utf8),
               Self.isValidHeaderShape(legacy)
         else { throw QwenUsageError.notLoggedIn }
@@ -42,13 +50,11 @@ final class QwenCookieRepository {
     }
 
     func markLoginSucceeded() {
-        // Never fall back to an older plaintext migration source after a fresh
-        // AIUsage login. Doing so could unexpectedly resurrect stale credentials.
-        defaults.set(true, forKey: Keys.ignoreLegacy)
+        defaults.set(true, forKey: ignoreLegacyKey)
     }
 
     func logout() async {
-        defaults.set(true, forKey: Keys.ignoreLegacy)
+        defaults.set(true, forKey: ignoreLegacyKey)
         for cookie in await allCookies() where Self.isQwenFamily(cookie.domain) {
             await delete(cookie)
         }
@@ -70,10 +76,6 @@ final class QwenCookieRepository {
         }
     }
 
-    /// Conservative RFC 6265-style domain/path/expiry checks with an
-    /// application-level HTTPS requirement. AIUsage constructs an explicit
-    /// Cookie header for authenticated Qwen requests, so it never forwards
-    /// those credentials over plaintext HTTP even when a cookie lacks Secure.
     nonisolated static func browserWouldSend(cookie: HTTPCookie, to url: URL) -> Bool {
         guard url.scheme?.lowercased() == "https" else { return false }
         guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
@@ -106,7 +108,6 @@ final class QwenCookieRepository {
         url.scheme == "https" && url.host?.lowercased() == "home.qwencloud.com"
     }
 
-    /// Reject obviously malformed legacy files: only name=value pairs.
     nonisolated static func isValidHeaderShape(_ header: String) -> Bool {
         let trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.contains("\n"), !trimmed.contains("\r") else { return false }
@@ -117,6 +118,4 @@ final class QwenCookieRepository {
             return name.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
         }
     }
-
-    private enum Keys { static let ignoreLegacy = "qwen.ignoreLegacyCookie" }
 }
