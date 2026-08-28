@@ -431,8 +431,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 enum ProviderInstanceAccountStore {
-    private static let defaults = UserDefaults.standard
-
     static func secretAccount(for instance: ProviderInstance) -> String {
         "provider.\(instance.provider.rawValue).\(instance.id.uuidString).credential"
     }
@@ -450,13 +448,14 @@ enum ProviderInstanceAccountStore {
     }
 
     static func credentialPath(for instanceID: UUID) -> String? {
-        let value = defaults.string(forKey: credentialPathKey(instanceID))?
+        let value = UserDefaults.standard.string(forKey: credentialPathKey(instanceID))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil
     }
 
     static func saveCredentialPath(_ path: String, for instanceID: UUID) {
         let value = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaults = UserDefaults.standard
         if value.isEmpty {
             defaults.removeObject(forKey: credentialPathKey(instanceID))
         } else {
