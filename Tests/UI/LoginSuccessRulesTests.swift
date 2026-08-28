@@ -45,18 +45,33 @@ final class LoginSuccessRulesTests: XCTestCase {
         XCTAssertFalse(AppDelegate.websiteDataRecordName("notopencode.ai", matches: "opencode.ai"))
     }
 
-    func testPopoverExpandsUntilItWouldExceedScreen() {
+    func testPopoverUsesMeasuredContentUntilItWouldExceedScreen() {
         XCTAssertEqual(
-            StatusItemController.preferredPopoverHeight(providerCount: 0, screenHeight: 1080),
+            StatusItemController.preferredPopoverHeight(
+                providerCount: 0,
+                measuredProviderListHeight: 0,
+                screenHeight: 1080),
             280)
         XCTAssertEqual(
-            StatusItemController.preferredPopoverHeight(providerCount: 3, screenHeight: 1080),
-            688)
+            StatusItemController.preferredPopoverHeight(
+                providerCount: 2,
+                measuredProviderListHeight: 640,
+                screenHeight: 1080),
+            758)
         XCTAssertEqual(
-            StatusItemController.preferredPopoverHeight(providerCount: 4, screenHeight: 1080),
-            878)
-        XCTAssertEqual(
-            StatusItemController.preferredPopoverHeight(providerCount: 5, screenHeight: 1080),
+            StatusItemController.preferredPopoverHeight(
+                providerCount: 3,
+                measuredProviderListHeight: 1_200,
+                screenHeight: 1080),
             1056)
+    }
+
+    func testPopoverUsesSafeCardEstimateBeforeMeasurementArrives() {
+        XCTAssertEqual(
+            StatusItemController.preferredPopoverHeight(
+                providerCount: 2,
+                measuredProviderListHeight: 0,
+                screenHeight: 1080),
+            778)
     }
 }
