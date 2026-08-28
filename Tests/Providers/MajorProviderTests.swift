@@ -87,6 +87,55 @@ final class MajorProviderTests: XCTestCase {
         XCTAssertThrowsError(try AntigravityProvider.parseQuotaSummary(data: data))
     }
 
+    func testAntigravityRemoteParserAcceptsBareDirectBucketFractions() throws {
+        let data = Data(#"""
+        {
+          "groups":[
+            {"buckets":[
+              {"bucketId":"gemini-5h","remainingFraction":0.91,"resetTime":"2026-08-28T12:00:00Z"},
+              {"bucketId":"gemini-weekly","remainingFraction":0.82},
+              {"bucketId":"3p-5h","remainingFraction":0.73},
+              {"bucketId":"3p-weekly","remainingFraction":0.64}
+            ]}
+          ]
+        }
+        """#.utf8)
+
+        let snapshot = try AntigravityRemoteProvider.parseRemoteQuotaSummary(data: data)
+
+        XCTAssertEqual(snapshot.windows.map(\.id), [
+            "antigravity-gemini-fiveHour",
+            "antigravity-thirdparty-fiveHour",
+            "antigravity-gemini-weekly",
+            "antigravity-thirdparty-weekly",
+        ])
+        XCTAssertEqual(snapshot.windows.map { $0.remainingPercent.rounded() }, [91, 73, 82, 64])
+        XCTAssertEqual(snapshot.windows.first?.resetsAt, ISO8601DateFormatter().date(from: "2026-08-28T12:00:00Z"))
+    }
+
+    func testAntigravityRemoteParserAcceptsWrappedSummaryAndNestedFraction() throws {
+        let data = Data(#"""
+        {
+          "response": {
+            "groups": [
+              {"buckets":[
+                {"bucketId":"gemini-5h","remaining":{"remainingFraction":0.5}}
+              ]}
+            ]
+          }
+        }
+        """#.utf8)
+
+        let snapshot = try AntigravityRemoteProvider.parseRemoteQuotaSummary(data: data)
+        XCTAssertEqual(snapshot.windows.map(\.id), ["antigravity-gemini-fiveHour"])
+        XCTAssertEqual(snapshot.windows.first?.usedPercent ?? -1, 50, accuracy: 0.0001)
+    }
+
+    func testAntigravityRemoteParserFailsClosedForUnknownBucketIDs() {
+        let data = Data(#"{"groups":[{"buckets":[{"bucketId":"future-image-daily","remainingFraction":0.9}]}]}"#.utf8)
+        XCTAssertThrowsError(try AntigravityRemoteProvider.parseRemoteQuotaSummary(data: data))
+    }
+
     func testAntigravityCSRFTokenParsingSupportsBothArgumentForms() {
         XCTAssertEqual(AntigravityProvider.csrfToken(from: "/app/language_server --csrf_token abc123 --other"), "abc123")
         XCTAssertEqual(AntigravityProvider.csrfToken(from: "/app/language_server --csrf_token=xyz789"), "xyz789")
