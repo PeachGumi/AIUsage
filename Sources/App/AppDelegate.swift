@@ -72,11 +72,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func removeProvider(_ instanceID: UUID) {
+        guard let instance = settings.instance(instanceID) else { return }
+
         loginControllers[instanceID]?.close()
         loginControllers.removeValue(forKey: instanceID)
         antigravityLoginTasks.removeValue(forKey: instanceID)?.cancel()
-        qwenRepositories.removeValue(forKey: instanceID)
-        openCodeStores.removeValue(forKey: instanceID)
+
+        let qwenRepository = qwenRepositories.removeValue(forKey: instanceID)
+        let openCodeStore = openCodeStores.removeValue(forKey: instanceID)
+        if !instance.isLegacyMigratedInstance {
+            switch instance.provider {
+            case .qwen:
+                let dataStore = qwenRepository?.dataStore ?? websiteDataStore(for: instance)
+                Task { [weak self] in
+                    await self?.removeWebsiteData(
+                        matching: ["qwencloud.com", "qianwenai.com"],
+                        dataStore: dataStore)
+                }
+            case .openCodeGo:
+                (openCodeStore ?? self.openCodeStore(for: instance)).clear()
+                let dataStore = websiteDataStore(for: instance)
+                Task { [weak self] in
+                    await self?.removeWebsiteData(matching: ["opencode.ai"], dataStore: dataStore)
+                }
+            case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
+                break
+            }
+        }
+
+        // Remove all AIUsage-owned UUID-scoped credentials. Legacy shared
+        // provider credentials/sessions are intentionally left untouched.
+        try? ProviderInstanceAccountStore.deleteSecret(for: instance)
+        try? ProviderInstanceAccountStore.deleteAntigravityCredentials(for: instance)
+        ProviderInstanceAccountStore.clearCredentialPath(for: instanceID)
+
         settings.removeProvider(instanceID)
         coordinator.setEnabledProviders(settings.registeredProviders)
     }
@@ -214,8 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureAntigravityAccount(_ instance: ProviderInstance) {
-        if let credentials = try? ProviderInstanceAccountStore.antigravityCredentials(for: instance),
-           let credentials {
+        if let credentials = try? ProviderInstanceAccountStore.antigravityCredentials(for: instance) {
             let alert = NSAlert()
             alert.messageText = "Antigravity account"
             alert.informativeText = credentials.email.map { "Connected as \($0)." }
@@ -569,6 +597,10 @@ enum ProviderInstanceAccountStore {
         } else {
             defaults.set(value, forKey: credentialPathKey(instanceID))
         }
+    }
+
+    static func clearCredentialPath(for instanceID: UUID) {
+        UserDefaults.standard.removeObject(forKey: credentialPathKey(instanceID))
     }
 
     private static func antigravityAccount(for instance: ProviderInstance) -> String {
