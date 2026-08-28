@@ -3,11 +3,17 @@ import Combine
 import SwiftUI
 
 @MainActor
+final class PopoverLayoutMetrics: ObservableObject {
+    @Published var providerListHeight: CGFloat = 0
+}
+
+@MainActor
 final class StatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let coordinator: UsageCoordinator
     private let settings: SettingsStore
+    private let layoutMetrics = PopoverLayoutMetrics()
     private var cancellables: Set<AnyCancellable> = []
 
     init(coordinator: UsageCoordinator, settings: SettingsStore, actions: AppActions) {
@@ -15,7 +21,11 @@ final class StatusItemController: NSObject {
         self.settings = settings
         super.init()
 
-        let dashboard = DashboardView(coordinator: coordinator, settings: settings, actions: actions)
+        let dashboard = DashboardView(
+            coordinator: coordinator,
+            settings: settings,
+            layoutMetrics: layoutMetrics,
+            actions: actions)
         popover.contentViewController = NSHostingController(rootView: dashboard)
         popover.behavior = .transient
         popover.animates = true
@@ -62,8 +72,16 @@ final class StatusItemController: NSObject {
                 self?.render()
             }
             .store(in: &cancellables)
+
+        layoutMetrics.$providerListHeight
+            .removeDuplicates { abs($0 - $1) < 0.5 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updatePopoverSize() }
+            .store(in: &cancellables)
     }
 
+    /// A menu bar click toggles the dashboard directly under the status item.
+    /// Provider selection remains available by clicking a card in the popover.
     @objc private func handleClick() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
@@ -71,6 +89,9 @@ final class StatusItemController: NSObject {
             return
         }
 
+        // Re-evaluate the current screen at open time in case the menu bar was
+        // moved between displays. The popover grows with the number of cards
+        // and only becomes scroll-constrained when it would exceed the screen.
         updatePopoverSize()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
@@ -88,17 +109,29 @@ final class StatusItemController: NSObject {
             width: 430,
             height: Self.preferredPopoverHeight(
                 providerCount: settings.registeredProviders.count,
+                measuredProviderListHeight: layoutMetrics.providerListHeight,
                 screenHeight: screenHeight))
     }
 
-    nonisolated static func preferredPopoverHeight(providerCount: Int, screenHeight: CGFloat) -> CGFloat {
+    /// Uses the actual SwiftUI card-stack height whenever available. The
+    /// conservative fallback prevents the first frame from clipping before
+    /// GeometryReader reports its measurement. Scrolling begins only at the
+    /// usable display-height boundary.
+    nonisolated static func preferredPopoverHeight(
+        providerCount: Int,
+        measuredProviderListHeight: CGFloat,
+        screenHeight: CGFloat
+    ) -> CGFloat {
         let safeScreenHeight = max(320, screenHeight - 24)
         if providerCount <= 0 {
             return min(280, safeScreenHeight)
         }
         let chromeHeight: CGFloat = 118
-        let estimatedCardHeight: CGFloat = 190
-        let naturalHeight = chromeHeight + CGFloat(providerCount) * estimatedCardHeight
+        let fallbackCardHeight: CGFloat = 330
+        let providerListHeight = measuredProviderListHeight > 0
+            ? measuredProviderListHeight
+            : CGFloat(providerCount) * fallbackCardHeight
+        let naturalHeight = chromeHeight + providerListHeight
         return min(max(320, naturalHeight), safeScreenHeight)
     }
 
@@ -183,44 +216,12 @@ final class StatusItemController: NSObject {
 
     private func severityColor(_ remaining: Double?) -> NSColor {
         guard let remaining else { return .secondaryLabelColor }
-        switch UsageSeverity(remainingPercent: remaining) {
-        case .healthy: return NSColor.systemGreen
-        case .warning: return NSColor.systemOrange
-        case .critical: return NSColor.systemRed
-        }
+        return ProviderVisuals.severityRGB(
+            UsageSeverity(remainingPercent: remaining)
+        ).nsColor
     }
 
-    private func brandColor(_ provider: ProviderID, appearance: NSAppearance?) -> NSColor {
-        let dark = (appearance ?? NSApp.effectiveAppearance)
-            .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        switch provider {
-        case .openCodeGo:
-            return dark ? NSColor(calibratedRed: 0.35, green: 0.85, blue: 0.90, alpha: 1)
-                : NSColor(calibratedRed: 0.00, green: 0.42, blue: 0.48, alpha: 1)
-        case .qwen:
-            return dark ? NSColor(calibratedRed: 0.68, green: 0.55, blue: 1.00, alpha: 1)
-                : NSColor(calibratedRed: 0.38, green: 0.22, blue: 0.72, alpha: 1)
-        case .codex:
-            return dark ? NSColor(calibratedRed: 0.55, green: 0.62, blue: 1.00, alpha: 1)
-                : NSColor(calibratedRed: 0.22, green: 0.27, blue: 0.68, alpha: 1)
-        case .claude:
-            return dark ? NSColor(calibratedRed: 0.92, green: 0.60, blue: 0.43, alpha: 1)
-                : NSColor(calibratedRed: 0.61, green: 0.31, blue: 0.18, alpha: 1)
-        case .antigravity:
-            return dark ? NSColor(calibratedRed: 0.48, green: 0.72, blue: 1.00, alpha: 1)
-                : NSColor(calibratedRed: 0.12, green: 0.39, blue: 0.74, alpha: 1)
-        case .copilot:
-            return dark ? NSColor(calibratedRed: 0.72, green: 0.60, blue: 1.00, alpha: 1)
-                : NSColor(calibratedRed: 0.35, green: 0.25, blue: 0.66, alpha: 1)
-        case .cursor:
-            return dark ? NSColor(calibratedWhite: 0.82, alpha: 1)
-                : NSColor(calibratedWhite: 0.25, alpha: 1)
-        case .zai:
-            return dark ? NSColor(calibratedRed: 0.33, green: 0.86, blue: 0.67, alpha: 1)
-                : NSColor(calibratedRed: 0.04, green: 0.46, blue: 0.34, alpha: 1)
-        case .kimi:
-            return dark ? NSColor(calibratedRed: 1.00, green: 0.58, blue: 0.80, alpha: 1)
-                : NSColor(calibratedRed: 0.69, green: 0.23, blue: 0.49, alpha: 1)
-        }
+    private func brandColor(_ provider: ProviderID, appearance _: NSAppearance?) -> NSColor {
+        ProviderVisuals.accentRGB(provider).nsColor
     }
 }
