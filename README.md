@@ -121,13 +121,25 @@ build/dist/AIUsage-macOS.zip.sha256
 | **OpenAI Codex** | 検証済み | 5-hour / Weekly | Codex CLIの既存OAuthを読み取り専用で利用 |
 | **Qwen Cloud** | Experimental | 5-hour / Weekly | AIUsage内Webログイン |
 | **Claude** | Experimental | 5-hour / Weekly | Claude Codeの既存OAuthを読み取り専用で利用 |
-| **Antigravity** | Experimental | Gemini / third-partyの5-hour・Weekly | ローカルAntigravityプロセスを検出してlocalhostへ問い合わせ |
+| **Antigravity** | Experimental | Gemini / third-partyの5-hour・Weekly | 起動中はローカルlanguage serverを優先。終了中はAntigravity/agyのKeychain OAuthを読み取り専用で利用し、Google Cloud Codeへ問い合わせ |
 | **GitHub Copilot** | Experimental | Monthly quota | `GH_TOKEN` / `GITHUB_TOKEN` またはGitHub CLI認証を利用 |
 | **Cursor** | Experimental | Monthly usage pools | Cursor.appの既存認証DBを読み取り専用で利用 |
 | **Z.AI GLM** | Experimental | 5-hour / Weekly | AIUsageのKeychainに保存したCoding Plan API keyを利用 |
 | **Kimi Code** | Experimental | 5-hour / Weekly | Kimi Code CLI認証または`KIMI_CODE_API_KEY`を利用 |
 
 Experimental統合は未知のレスポンス形状を0%として推測せず、エラーとしてfail closedします。実アカウントで公式dashboardとの一致を確認できた場合は、秘密情報を除いた検証報告や修正Pull Requestを歓迎します。
+
+### 外部アプリの起動状態について
+
+AIUsageの5分おきの更新は、原則として対象サービスのデスクトップアプリやCLIを起動し続けることを前提にしていません。
+
+- **Antigravity** は起動中のローカルquotaを優先しますが、アプリ終了時は保存済みKeychain OAuthからremote quotaを取得します。期限切れaccess tokenの更新に必要なinstalled-app OAuth metadataも、インストール済みAntigravity.appから実行時に検出します。Antigravity自身のKeychain項目は書き換えません。
+- **Claude / Cursor / Kimi Code** は保存済みクライアント認証を使うため、各アプリ/CLIのプロセスが常駐している必要はありません。ただし、それらのクライアントが所有するcredential自体が期限切れになった場合は再ログインが必要になることがあります。AIUsageは他アプリ所有のrefresh tokenを勝手に更新しません。
+- **GitHub Copilot** のGitHub CLIはtoken取得時だけ短時間実行され、常駐しません。
+- **OpenCode Go / Qwen Cloud / Z.AI** はAIUsage自身が保持するセッション/API keyを使います。
+
+> [!NOTE]
+> AntigravityのGoogle OAuth側quota payloadはアカウントやビルドによってローカルquotaより情報が少ない場合があります。AIUsageは既知の `gemini-5h` / `gemini-weekly` / `3p-5h` / `3p-weekly` を実際に受け取れた場合だけ表示し、不完全なレスポンスから残量を推測しません。該当laneを取得できなければ直前値をstale表示として残すか、初回ならエラーを表示します。
 
 ## 表示と更新の仕組み
 
@@ -151,8 +163,9 @@ AIUsageは、認証済みセッションを扱うアプリとして「必要な�
 | 独自バックエンド | なし |
 | 分析 / 広告 / テレメトリー | なし |
 | 未登録プロバイダーへのusage取得 | 行わない |
-| 外部クライアント認証 | Codex / Claude / Antigravity / GitHub CLI / Cursor / Kimiの状態は読み取り専用。AIUsageから変更・削除しない |
-| AIUsage所有の資格情報 | Z.AI API keyはmacOS Keychain、OpenCode / QwenはWebKitデータストアへ保存 |
+| 外部クライアント認証 | Codex / Claude / Antigravity / GitHub CLI / Cursor / Kimiの元credentialは読み取り専用。AIUsageから変更・削除しない |
+| AIUsage所有の資格情報 | Z.AI API key、Antigravityの短期派生access-token cacheはmacOS Keychain。OpenCode / QwenはWebKitデータストアへ保存 |
+| Antigravity派生cache | 元refresh tokenのSHA-256 fingerprintに結び付け、元ログインが消えた/変わった場合は再利用しない |
 | Provider HTTPセッション | ephemeral。共有Cookie・資格情報・URL cacheを使わない |
 | 資格情報付きHTTP redirect | 拒否 |
 | Qwen Cookie | HTTPSかつ送信先domain/path/expiryを確認して明示ヘッダーを構築 |
@@ -168,7 +181,7 @@ AIUsageは、認証済みセッションを扱うアプリとして「必要な�
 詳細は [PRIVACY.md](PRIVACY.md) と [SECURITY.md](SECURITY.md) を参照してください。
 
 > [!CAUTION]
-> 不具合報告にOAuth token、Cookie、Cookie header、account ID、workspace ID、認証済みAPIレスポンス全文を貼らないでください。Provider側の仕様変更を報告するIssue Formも、サニタイズ済み情報だけを前提にしています。
+> 不具合報告にOAuth token、refresh token、Cookie、Cookie header、account ID、workspace ID、認証済みAPIレスポンス全文を貼らないでください。Provider側の仕様変更を報告するIssue Formも、サニタイズ済み情報だけを前提にしています。
 
 ## 制約と注意事項
 
@@ -210,6 +223,15 @@ OpenCode Goカードの **Sign in** からログインしてください。ロ�
 </details>
 
 <details>
+<summary><strong>Antigravityを終了すると更新できない？</strong></summary>
+
+通常は更新を試みます。Antigravity.appが起動中ならローカルlanguage serverを優先し、起動していなければ保存済みKeychain OAuthからGoogle Cloud Codeのquota summaryを取得します。
+
+remote quotaはExperimentalです。Google側が既知の5-hour / Weekly laneを返さない場合、AIUsageは残量を推測せずfail closedします。過去の正常値があればstaleとして残ります。最初に一度はAntigravityまたは`agy`でログインしておく必要があります。
+
+</details>
+
+<details>
 <summary><strong>昨日まで取得できていたのに、急に失敗するようになった</strong></summary>
 
 まずカードの **Refresh** を試してください。継続する場合は、Provider側の非公開APIまたはDOM変更の可能性があります。
@@ -237,12 +259,9 @@ flowchart LR
     Dashboard --> Settings[SettingsStore]
     Dashboard --> Coordinator[UsageCoordinator]
     Settings -->|registered providers| Coordinator
-    Coordinator --> Codex[CodexProvider]
-    Coordinator --> Qwen[QwenProvider]
-    Coordinator --> OpenCode[OpenCodeGoProvider]
-    Codex --> ChatGPT[chatgpt.com usage endpoint]
-    Qwen --> QwenCloud[qwencloud.com endpoints]
-    OpenCode --> OpenCodeWeb[opencode.ai Web UI]
+    Coordinator --> Providers[UsageProvider implementations]
+    Providers --> Local[Local client/session sources]
+    Providers --> Remote[Provider usage endpoints]
 ```
 
 責務は大きく次のように分離しています。
@@ -327,6 +346,8 @@ Live Testsでも、OAuth tokenやCookie、実使用率そのものはログへ�
 
 Issue / Pull Requestを歓迎します。Provider連携は認証済みセッションと不安定な上流仕様を扱うため、変更前に [CONTRIBUTING.md](CONTRIBUTING.md) の安全要件を確認してください。
 
+特にExperimental Provider（Qwen Cloud / Claude / Antigravity / GitHub Copilot / Cursor / Z.AI / Kimi Code）の実アカウント検証を歓迎します。公式dashboardとの一致・不一致、認証方式の変化、サニタイズ済みfixture、provider-specificな修正Pull Requestは非常に有用です。
+
 通常のバグは [Issues](https://github.com/PeachGumi/AIUsage/issues) から、Provider側の変更が疑われる場合は専用のProvider breakage Issue Formから報告できます。
 
 ## セキュリティ報告
@@ -341,4 +362,4 @@ Issue / Pull Requestを歓迎します。Provider連携は認証済みセッシ�
 
 ## 謝辞
 
-OpenAI Codexの使用量取得方式を調査する際、MITライセンスの [CodexBar](https://github.com/steipete/CodexBar) を参考にしています。ライセンス表記の詳細は [NOTICE](NOTICE) を参照してください。
+OpenAI CodexおよびExperimental Providerの使用量取得方式を調査する際、MITライセンスの [CodexBar](https://github.com/steipete/CodexBar) などの公開実装を参考にしています。ライセンス表記の詳細は [NOTICE](NOTICE) を参照してください。
