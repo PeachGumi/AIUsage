@@ -14,8 +14,13 @@ final class OpenCodeWorkspaceStore {
         allowsLegacyMigration: Bool = true)
     {
         self.defaults = defaults
-        self.workspaceKey = "opencode.\(namespace).workspaceID"
-        self.ignoreLegacyKey = "opencode.\(namespace).ignoreLegacyWorkspaceID"
+        if namespace == "default" {
+            self.workspaceKey = "opencode.workspaceID"
+            self.ignoreLegacyKey = "opencode.ignoreLegacyWorkspaceID"
+        } else {
+            self.workspaceKey = "opencode.\(namespace).workspaceID"
+            self.ignoreLegacyKey = "opencode.\(namespace).ignoreLegacyWorkspaceID"
+        }
         self.allowsLegacyMigration = allowsLegacyMigration
 
         let stored = Self.valid(defaults.string(forKey: workspaceKey))
@@ -26,12 +31,8 @@ final class OpenCodeWorkspaceStore {
             : nil
 
         workspaceID = stored ?? migrated
-        if let workspaceID {
-            defaults.set(workspaceID, forKey: workspaceKey)
-        }
-        if migrated != nil {
-            defaults.set(true, forKey: ignoreLegacyKey)
-        }
+        if let workspaceID { defaults.set(workspaceID, forKey: workspaceKey) }
+        if migrated != nil { defaults.set(true, forKey: ignoreLegacyKey) }
     }
 
     var usageURL: URL {
