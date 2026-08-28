@@ -71,7 +71,15 @@ final class UsageCoordinator: ObservableObject {
     }
 
     func setEnabledProviders(_ nextInstances: [ProviderInstance]) {
-        let nextByID = Dictionary(uniqueKeysWithValues: nextInstances.map { ($0.id, $0) })
+        // SettingsStore already sanitizes persisted UUIDs, but keep the
+        // coordinator defensive because callers/tests can supply instances
+        // directly. First occurrence wins, matching SettingsStore migration
+        // behavior, instead of Dictionary(uniqueKeysWithValues:) trapping.
+        var nextByID: [UUID: ProviderInstance] = [:]
+        for instance in nextInstances where nextByID[instance.id] == nil {
+            nextByID[instance.id] = instance
+        }
+
         let nextIDs = Set(nextByID.keys)
         let removed = enabledInstanceIDs.subtracting(nextIDs)
         let added = nextIDs.subtracting(enabledInstanceIDs)
