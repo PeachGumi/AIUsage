@@ -64,8 +64,6 @@ final class StatusItemController: NSObject {
             .store(in: &cancellables)
     }
 
-    /// A menu bar click toggles the dashboard directly under the status item.
-    /// Provider selection remains available by clicking a card in the popover.
     @objc private func handleClick() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
@@ -73,9 +71,6 @@ final class StatusItemController: NSObject {
             return
         }
 
-        // Re-evaluate the current screen at open time in case the menu bar was
-        // moved between displays. The popover grows with the number of cards
-        // and only becomes scroll-constrained when it would exceed the screen.
         updatePopoverSize()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
@@ -96,9 +91,6 @@ final class StatusItemController: NSObject {
                 screenHeight: screenHeight))
     }
 
-    /// Keep small/medium provider sets fully expanded. Scrolling is only
-    /// required when the estimated natural card stack would exceed the usable
-    /// display height.
     nonisolated static func preferredPopoverHeight(providerCount: Int, screenHeight: CGFloat) -> CGFloat {
         let safeScreenHeight = max(320, screenHeight - 24)
         if providerCount <= 0 {
@@ -211,6 +203,24 @@ final class StatusItemController: NSObject {
         case .codex:
             return dark ? NSColor(calibratedRed: 0.55, green: 0.62, blue: 1.00, alpha: 1)
                 : NSColor(calibratedRed: 0.22, green: 0.27, blue: 0.68, alpha: 1)
+        case .claude:
+            return dark ? NSColor(calibratedRed: 0.92, green: 0.60, blue: 0.43, alpha: 1)
+                : NSColor(calibratedRed: 0.61, green: 0.31, blue: 0.18, alpha: 1)
+        case .antigravity:
+            return dark ? NSColor(calibratedRed: 0.48, green: 0.72, blue: 1.00, alpha: 1)
+                : NSColor(calibratedRed: 0.12, green: 0.39, blue: 0.74, alpha: 1)
+        case .copilot:
+            return dark ? NSColor(calibratedRed: 0.72, green: 0.60, blue: 1.00, alpha: 1)
+                : NSColor(calibratedRed: 0.35, green: 0.25, blue: 0.66, alpha: 1)
+        case .cursor:
+            return dark ? NSColor(calibratedWhite: 0.82, alpha: 1)
+                : NSColor(calibratedWhite: 0.25, alpha: 1)
+        case .zai:
+            return dark ? NSColor(calibratedRed: 0.33, green: 0.86, blue: 0.67, alpha: 1)
+                : NSColor(calibratedRed: 0.04, green: 0.46, blue: 0.34, alpha: 1)
+        case .kimi:
+            return dark ? NSColor(calibratedRed: 1.00, green: 0.58, blue: 0.80, alpha: 1)
+                : NSColor(calibratedRed: 0.69, green: 0.23, blue: 0.49, alpha: 1)
         }
     }
 }
