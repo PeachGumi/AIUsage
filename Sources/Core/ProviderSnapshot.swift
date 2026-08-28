@@ -13,9 +13,6 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// Providers exposed in the Add Provider UI. Experimental providers are
-    /// intentionally visible so users can validate them and contribute fixes;
-    /// their status is surfaced explicitly in the UI and documentation.
     static let implemented: [ProviderID] = [
         .openCodeGo,
         .codex,
@@ -56,10 +53,6 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// Only Codex and OpenCode Go have been validated against real maintainer
-    /// accounts. Every other integration is contract/fixture-tested but remains
-    /// experimental until real-account users confirm it against the provider's
-    /// official usage display and contribute any required fixes.
     var isExperimental: Bool {
         switch self {
         case .openCodeGo, .codex:
@@ -69,10 +62,6 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// Only these providers have credentials/session state owned by AIUsage.
-    /// Claude, Antigravity, Copilot, Cursor and Kimi reuse external clients'
-    /// existing authentication read-only by default and therefore are never
-    /// signed out by AIUsage unless an instance-specific override is configured.
     var managesAuthentication: Bool {
         switch self {
         case .openCodeGo, .qwen, .zai:
@@ -102,8 +91,31 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         return "\(provider.displayName) · \(accountLabel)"
     }
 
+    var isLegacyMigratedInstance: Bool {
+        id == Self.legacyID(for: provider)
+    }
+
     func withAccountLabel(_ value: String?) -> ProviderInstance {
         ProviderInstance(id: id, provider: provider, accountLabel: value)
+    }
+
+    /// Stable IDs used only when converting the old one-card-per-provider
+    /// representation. They let AppDelegate recognize the migrated Qwen/
+    /// OpenCode card and keep using WKWebsiteDataStore.default(), preserving the
+    /// user's already-authenticated WebKit session across this migration.
+    static func legacyID(for provider: ProviderID) -> UUID {
+        let suffix: String = switch provider {
+        case .openCodeGo: "000001"
+        case .qwen: "000002"
+        case .codex: "000003"
+        case .claude: "000004"
+        case .antigravity: "000005"
+        case .copilot: "000006"
+        case .cursor: "000007"
+        case .zai: "000008"
+        case .kimi: "000009"
+        }
+        return UUID(uuidString: "A1A6E000-0000-4000-8000-\(suffix)")!
     }
 
     private static func cleanedLabel(_ value: String?) -> String? {
