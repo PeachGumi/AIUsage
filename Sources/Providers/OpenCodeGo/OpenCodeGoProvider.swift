@@ -1,10 +1,8 @@
 import AppKit
 import WebKit
 
-/// GoUsage-compatible OpenCode Go fetcher: a hidden, offscreen WKWebView loads
-/// the server-rendered /workspace/{id}/go page and scrapes the usage DOM.
-/// WKWebsiteDataStore.default() keeps the OpenCode session across launches,
-/// exactly like the standalone GoUsage app.
+/// GoUsage-compatible OpenCode Go fetcher. Each provider instance can receive a
+/// distinct persistent WKWebsiteDataStore, allowing simultaneous accounts.
 @MainActor
 final class OpenCodeGoProvider: NSObject, UsageProvider {
     let id: ProviderID = .openCodeGo
@@ -17,23 +15,24 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     private var scrapeTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
     private var scrapeRetries = 0
-    /// Diagnostic only: the URL the scraper last saw (never contains secrets
-    /// beyond the workspace path, which stays in-process).
     private(set) var lastObservedURL: URL?
 
-    /// GoUsage loads /workspace/{id}/go directly because it always knows the ID.
-    /// This app discovers the ID instead: when none is stored, it starts at the
-    /// console page, reads the workspace ID from the logged-in DOM, and follows
-    /// it to the /go page (see scrape/redirect handling below).
     private var startURL: URL {
         workspaceStore.workspaceID == nil ? Self.discoveryURL : workspaceStore.usageURL
     }
 
     private static let discoveryURL = URL(string: "https://opencode.ai/console/")!
 
-    init(workspaceStore: OpenCodeWorkspaceStore = OpenCodeWorkspaceStore()) {
+    init(
+        workspaceStore: OpenCodeWorkspaceStore = OpenCodeWorkspaceStore(),
+        dataStore: WKWebsiteDataStore = .default())
+    {
         self.workspaceStore = workspaceStore
-        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1000, height: 800))
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = dataStore
+        webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 1000, height: 800),
+            configuration: configuration)
         hiddenWindow = NSWindow(
             contentRect: NSRect(x: -3000, y: -3000, width: 1000, height: 800),
             styleMask: [.borderless],
@@ -53,8 +52,6 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             self.startTimeout(generation: generation)
-            // Mirror GoUsage: load the workspace /go page directly; cookies from
-            // the default data store authenticate the request server-side.
             self.webView.load(URLRequest(
                 url: self.startURL,
                 cachePolicy: .reloadIgnoringLocalCacheData,
@@ -79,9 +76,6 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     private func scheduleScrape(generation: Int, delay: Duration = .seconds(2)) {
         scrapeTask?.cancel()
         scrapeTask = Task { [weak self] in
-            // GoUsage reads the server-rendered page after the initial hydration
-            // pass; the integrated app uses the same DOM but allows a little more
-            // time for the workspace list to appear.
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             self?.scrape(generation: generation)
@@ -93,9 +87,6 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
             Task { @MainActor in
                 guard let self, self.activeGeneration == generation, self.continuation != nil else { return }
                 if let error {
-                    // A failed evaluateJavaScript on a page that navigated away is
-                    // common while the console SPA is still routing; retry once
-                    // before giving up.
                     self.scrapeRetries += 1
                     if self.scrapeRetries <= 3 {
                         self.scheduleScrape(generation: generation, delay: .seconds(2))
@@ -128,9 +119,6 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
 
     private func complete(generation: Int, _ result: Result<ProviderSnapshot, Error>) {
         guard activeGeneration == generation, let continuation else { return }
-        // The console SPA sometimes needs another hydration beat before the
-        // usage DOM exists; retry the scrape a few times before surfacing a
-        // parser error, mirroring GoUsage's tolerant polling.
         if case let .failure(error) = result,
            let openCodeError = error as? OpenCodeGoError,
            openCodeError == .invalidResponse,
@@ -161,11 +149,11 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
         return URL(string: "https://opencode.ai" + path)
     }
 
-    /// load; anything else cancels the fetch instead of being evaluated.
     private func isAllowedScraperURL(_ url: URL) -> Bool {
         guard url.scheme == "https" else { return false }
         return url.host == "opencode.ai" || url.host == "auth.opencode.ai"
     }
+
     private static let scrapeJS = """
     (function(){
       var items = document.querySelectorAll('[data-slot="usage-item"]');
