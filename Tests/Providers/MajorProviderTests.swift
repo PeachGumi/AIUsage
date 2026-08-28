@@ -93,6 +93,90 @@ final class MajorProviderTests: XCTestCase {
         XCTAssertNil(AntigravityProvider.csrfToken(from: "/app/language_server"))
     }
 
+    func testAntigravityCredentialParserReadsGoKeyringWrappedToken() {
+        let json = #"{"token":{"access_token":"access-fixture","refresh_token":"refresh-fixture","expiry":"2026-09-01T12:00:00Z"}}"#
+        let encoded = Data(json.utf8).base64EncodedString()
+
+        let credential = AntigravityCredentialStore.parse(raw: "go-keyring-base64:\(encoded)")
+
+        XCTAssertEqual(credential?.accessToken, "access-fixture")
+        XCTAssertEqual(credential?.refreshToken, "refresh-fixture")
+        XCTAssertEqual(
+            credential?.expiresAt,
+            ISO8601DateFormatter().date(from: "2026-09-01T12:00:00Z"))
+    }
+
+    func testAntigravityCredentialParserFailsClosedForMalformedStructuredData() {
+        XCTAssertNil(AntigravityCredentialStore.parse(raw: #"{"token":}"#))
+    }
+
+    func testAntigravityOAuthClientIsDiscoveredFromInstalledArtifactContent() {
+        let clientID = "123456789-" + "fixture" + ".apps.googleusercontent.com"
+        let clientSecret = "GOC" + "SPX-" + String(repeating: "a", count: 28)
+        let artifact = "vs/platform/cloudCode/common/oauthClient.js \(clientID) \(clientSecret)"
+
+        let client = AntigravityOAuthClientDiscovery.parseClient(fromText: artifact)
+
+        XCTAssertEqual(client?.clientID, clientID)
+        XCTAssertEqual(client?.clientSecret, clientSecret)
+    }
+
+    func testAntigravityBackgroundProviderFallsBackWhenLocalSourceIsUnavailable() async throws {
+        let local = StubUsageProvider(id: .antigravity) {
+            throw MajorProviderError.unavailable("Antigravity is closed")
+        }
+        let remoteSnapshot = ProviderSnapshot(
+            provider: .antigravity,
+            planName: "Pro",
+            windows: [try UsageWindow(
+                id: "remote-five-hour",
+                kind: .fiveHour,
+                label: "5-hour",
+                compactLabel: "5h",
+                usedPercent: 20,
+                resetsAt: nil,
+                resetDescription: nil)],
+            fetchedAt: Date())
+        let remote = StubUsageProvider(id: .antigravity) { remoteSnapshot }
+        let provider = AntigravityBackgroundProvider(
+            localProvider: local,
+            remoteProvider: remote)
+
+        let snapshot = try await provider.fetch()
+
+        XCTAssertEqual(snapshot, remoteSnapshot)
+        XCTAssertEqual(local.fetchCount, 1)
+        XCTAssertEqual(remote.fetchCount, 1)
+    }
+
+    func testAntigravityBackgroundProviderPrefersRunningLocalSource() async throws {
+        let localSnapshot = ProviderSnapshot(
+            provider: .antigravity,
+            planName: "Pro",
+            windows: [try UsageWindow(
+                id: "local-five-hour",
+                kind: .fiveHour,
+                label: "5-hour",
+                compactLabel: "5h",
+                usedPercent: 10,
+                resetsAt: nil,
+                resetDescription: nil)],
+            fetchedAt: Date())
+        let local = StubUsageProvider(id: .antigravity) { localSnapshot }
+        let remote = StubUsageProvider(id: .antigravity) {
+            throw MajorProviderError.unavailable("Remote should not be called")
+        }
+        let provider = AntigravityBackgroundProvider(
+            localProvider: local,
+            remoteProvider: remote)
+
+        let snapshot = try await provider.fetch()
+
+        XCTAssertEqual(snapshot, localSnapshot)
+        XCTAssertEqual(local.fetchCount, 1)
+        XCTAssertEqual(remote.fetchCount, 0)
+    }
+
     func testCopilotParsesDirectQuotaSnapshots() throws {
         let data = Data(#"""
         {
@@ -189,5 +273,22 @@ final class MajorProviderTests: XCTestCase {
 
     func testKimiRejectsResponseWithoutUsableQuota() {
         XCTAssertThrowsError(try KimiProvider.parseUsage(data: Data(#"{"usage":{"limit":"0","used":"0"},"limits":[]}"#.utf8)))
+    }
+}
+
+@MainActor
+private final class StubUsageProvider: UsageProvider {
+    let id: ProviderID
+    private let handler: () async throws -> ProviderSnapshot
+    private(set) var fetchCount = 0
+
+    init(id: ProviderID, handler: @escaping () async throws -> ProviderSnapshot) {
+        self.id = id
+        self.handler = handler
+    }
+
+    func fetch() async throws -> ProviderSnapshot {
+        fetchCount += 1
+        return try await handler()
     }
 }
