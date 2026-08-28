@@ -102,11 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch provider {
         case .openCodeGo, .qwen:
             showWebLogin(provider)
-        case .copilot:
-            beginCopilotLogin()
         case .zai:
             promptForZAIKey()
-        case .codex, .claude, .antigravity, .cursor, .kimi:
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
             // Authentication for these providers belongs to their official
             // local client. The card normally hides managed-auth controls, but
             // this fallback keeps the action safe if called programmatically.
@@ -131,33 +129,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         loginControllers[provider] = controller
         controller.show()
-    }
-
-    private func beginCopilotLogin() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let device = try await CopilotDeviceFlowService.requestDeviceCode()
-                let alert = NSAlert()
-                alert.messageText = "Sign in to GitHub Copilot"
-                alert.informativeText = "GitHub code: \(device.userCode)\n\nContinue in your browser. AIUsage requests only the read:user scope and stores the resulting OAuth token in your macOS Keychain."
-                alert.alertStyle = .informational
-                alert.addButton(withTitle: "Open GitHub")
-                alert.addButton(withTitle: "Cancel")
-                guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(device.userCode, forType: .string)
-                let destination = device.verificationURIComplete ?? device.verificationURI
-                if let url = URL(string: destination) { NSWorkspace.shared.open(url) }
-
-                let token = try await CopilotDeviceFlowService.poll(deviceCode: device)
-                try AIUsageSecretStore.save(token, account: CopilotProvider.keychainAccount)
-                await coordinator.refresh(.copilot)
-            } catch {
-                showError(title: "GitHub Copilot sign-in failed", error: error)
-            }
-        }
     }
 
     private func promptForZAIKey() {
@@ -197,13 +168,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             workspaceStore.clear()
             await removeWebsiteData(matching: ["opencode.ai"])
             coordinator.markSignedOut(.openCodeGo, message: "OpenCode login is required.")
-        case .copilot:
-            try? AIUsageSecretStore.delete(account: CopilotProvider.keychainAccount)
-            coordinator.markSignedOut(.copilot, message: "GitHub Copilot login is required.")
         case .zai:
             try? AIUsageSecretStore.delete(account: ZAIProvider.keychainAccount)
             coordinator.markSignedOut(.zai, message: "Z.AI API key is required.")
-        case .codex, .claude, .antigravity, .cursor, .kimi:
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
             // External-client credentials are read-only from AIUsage's point of
             // view and must never be deleted by an AIUsage Sign out action.
             break

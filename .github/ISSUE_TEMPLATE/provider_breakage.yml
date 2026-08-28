@@ -17,6 +17,12 @@ body:
         - OpenAI Codex
         - Qwen Cloud
         - OpenCode Go
+        - Claude (Experimental)
+        - Antigravity (Experimental)
+        - GitHub Copilot (Experimental)
+        - Cursor (Experimental)
+        - Z.AI GLM (Experimental)
+        - Kimi Code (Experimental)
     validations:
       required: true
 
@@ -35,6 +41,14 @@ body:
       placeholder: "macOS 15.6"
     validations:
       required: true
+
+  - type: checkboxes
+    id: experimental
+    attributes:
+      label: Experimental provider validation
+      description: Applies to Qwen, Claude, Antigravity, Copilot, Cursor, Z.AI, and Kimi.
+      options:
+        - label: I compared AIUsage with the provider's official usage dashboard and will describe only sanitized differences below.
 
   - type: textarea
     id: state

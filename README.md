@@ -22,7 +22,10 @@
 </div>
 
 > [!IMPORTANT]
-> AIUsageはOpenCode、OpenAI、Qwenの公式アプリ・公式SDKではありません。使用量の取得には、各サービスの非公開または安定性が保証されていないendpoint / Webページ構造を利用しています。サービス側の変更により、一時的に取得できなくなる可能性があります。
+> AIUsageは各プロバイダーの公式アプリ・公式SDKではありません。使用量の取得には、各サービスの非公開または安定性が保証されていないendpoint / ローカルクライアント情報を利用しています。サービス側の変更により、一時的に取得できなくなる可能性があります。
+
+> [!WARNING]
+> 実アカウントで検証済みなのは **OpenCode Go / OpenAI Codexのみ** です。Qwen Cloud、Claude、Antigravity、GitHub Copilot、Cursor、Z.AI、Kimi Codeはfixtureテスト済みの実験的統合で、Add Provider画面でもExperimentalと表示されます。表示値は必ず公式dashboardと照合してください。
 
 ## 特徴
 
@@ -86,7 +89,7 @@ build/dist/AIUsage-macOS.zip.sha256
 1. AIUsageを起動します。初回はメニューバーに `AI +` と表示されます。
 2. `AI +` をクリックしてPopoverを開きます。
 3. 右上の **+** から使いたいプロバイダーを追加します。
-4. 必要なら各カードの **Sign in** からログインします。CodexはCodex CLI側で事前にログインします。
+4. 必要なら各カードの認証案内に従います。OpenCode Go / Qwenは **Sign in**、Z.AIは **API key…**、それ以外は公式ローカルクライアントの既存認証を読み取り専用で利用します。
 5. カードをクリックすると、そのプロバイダーがメニューバー表示へ固定されます。
 6. 左端のドラッグハンドルでカードを並び替えられます。
 7. **Settings** からメニューバーに表示する値を「Remaining / Used」で切り替えられます。
@@ -98,8 +101,9 @@ build/dist/AIUsage-macOS.zip.sha256
 | 操作 | 内容 |
 |---|---|
 | `Refresh` | そのプロバイダーだけ再取得 |
-| `Sign in` | AIUsage内のWebログインを開始（Codexを除く） |
-| `Sign out` | AIUsageが保持する対象サービスのWebログイン状態を削除 |
+| `Sign in` | OpenCode Go / QwenのAIUsage内Webログインを開始 |
+| `API key…` | Z.AI Coding PlanのAPI keyをmacOS Keychainへ保存 |
+| `Sign out` | AIUsageが所有するWebログインまたはAPI keyだけを削除 |
 | `Open dashboard` | 各サービスの使用量ページをブラウザで開く |
 | `Remove` | AIUsageの登録一覧から外す。ログアウトはしない |
 
@@ -107,23 +111,23 @@ build/dist/AIUsage-macOS.zip.sha256
 
 **Remove** は「AIUsageで監視しない」にする操作です。再追加しやすいよう、WebKitのログインセッションやCodex CLIの認証状態は消しません。
 
-**Sign out** は認証状態を削除する操作です。OpenCode Goでは保存済みworkspace IDも削除します。Codexの `~/.codex/auth.json` はAIUsageが書き換えないため、Codexから完全にログアウトする場合はCodex CLI側で行ってください。
+**Sign out** はAIUsageが所有する認証状態だけを削除する操作です。OpenCode Goでは保存済みworkspace IDも削除します。Codex / Claude / Antigravity / GitHub Copilot / Cursor / Kimiの既存クライアント認証は読み取り専用で、AIUsageから削除しません。
 
 ## 対応プロバイダー
 
-現在ユーザー向けに有効化しているのは次の3プロバイダーです。
-
-| プロバイダー | 表示する使用枠 | 取得方式 | 初期設定 |
+| プロバイダー | 状態 | 表示する使用枠 | 認証 / 取得方式 |
 |---|---|---|---|
-| **OpenCode Go** | 5-hour / Weekly / Monthly | ログイン済みページをWKWebViewで解析 | `+` で追加後、カードの `Sign in` |
-| **OpenAI Codex** | 5-hour / Weekly | `~/.codex/auth.json` の既存OAuth情報を読み取り、usage endpointへ問い合わせ | 先にCodex CLIでログインしてから追加 |
-| **Qwen Cloud** | 5-hour / Weekly | WebKit Cookieを使ってQwen Cloudのusage APIへ問い合わせ | `+` で追加後、カードの `Sign in` |
+| **OpenCode Go** | 検証済み | 5-hour / Weekly / Monthly | AIUsage内Webログイン |
+| **OpenAI Codex** | 検証済み | 5-hour / Weekly | Codex CLIの既存OAuthを読み取り専用で利用 |
+| **Qwen Cloud** | Experimental | 5-hour / Weekly | AIUsage内Webログイン |
+| **Claude** | Experimental | 5-hour / Weekly | Claude Codeの既存OAuthを読み取り専用で利用 |
+| **Antigravity** | Experimental | Gemini / third-partyの5-hour・Weekly | ローカルAntigravityプロセスを検出してlocalhostへ問い合わせ |
+| **GitHub Copilot** | Experimental | Monthly quota | `GH_TOKEN` / `GITHUB_TOKEN` またはGitHub CLI認証を利用 |
+| **Cursor** | Experimental | Monthly usage pools | Cursor.appの既存認証DBを読み取り専用で利用 |
+| **Z.AI GLM** | Experimental | 5-hour / Weekly | AIUsageのKeychainに保存したCoding Plan API keyを利用 |
+| **Kimi Code** | Experimental | 5-hour / Weekly | Kimi Code CLI認証または`KIMI_CODE_API_KEY`を利用 |
 
-### 将来のプロバイダー
-
-プロバイダーID、取得実装、ユーザーへ公開するカタログを分離しています。Claude / Gemini / GitHub Copilotなどの対応を試作する場合でも、認証境界・parser・失敗時挙動・fixtureテストを確認し、`ProviderID.implemented` に明示的に追加するまではAdd Providerメニューへ表示されません。
-
-実アカウントで検証できないプロバイダーを、推測だけで「対応済み」として公開しない方針です。
+Experimental統合は未知のレスポンス形状を0%として推測せず、エラーとしてfail closedします。実アカウントで公式dashboardとの一致を確認できた場合は、秘密情報を除いた検証報告や修正Pull Requestを歓迎します。
 
 ## 表示と更新の仕組み
 
@@ -147,8 +151,9 @@ AIUsageは、認証済みセッションを扱うアプリとして「必要な�
 | 独自バックエンド | なし |
 | 分析 / 広告 / テレメトリー | なし |
 | 未登録プロバイダーへのusage取得 | 行わない |
-| Codex認証ファイル | 読み取りのみ。AIUsageから変更しない |
-| Codex / QwenのHTTPセッション | ephemeral。共有Cookie・資格情報・URL cacheを使わない |
+| 外部クライアント認証 | Codex / Claude / Antigravity / GitHub CLI / Cursor / Kimiの状態は読み取り専用。AIUsageから変更・削除しない |
+| AIUsage所有の資格情報 | Z.AI API keyはmacOS Keychain、OpenCode / QwenはWebKitデータストアへ保存 |
+| Provider HTTPセッション | ephemeral。共有Cookie・資格情報・URL cacheを使わない |
 | 資格情報付きHTTP redirect | 拒否 |
 | Qwen Cookie | HTTPSかつ送信先domain/path/expiryを確認して明示ヘッダーを構築 |
 | OpenCode / Qwen Webログイン | macOS標準のWebKitデータストアを利用 |
@@ -170,7 +175,7 @@ AIUsageは、認証済みセッションを扱うアプリとして「必要な�
 - 各サービスの公式usage SDKを使用しているわけではありません。
 - 非公開endpointやDOM構造は予告なく変更される可能性があります。
 - 上流の仕様変更直後は、一部プロバイダーだけ取得できなくなることがあります。
-- 現在の一般ユーザー向け対応プロバイダーはOpenCode Go / OpenAI Codex / Qwen Cloudのみです。
+- OpenCode Go / OpenAI Codex以外はExperimentalで、実アカウントとの一致を保証していません。
 - GitHub Releasesによる署名・公証済み配布と自動アップデートはまだ提供していません。
 - 各サービス名・商標は各権利者に帰属し、AIUsageは各社から承認・提携を受けた製品ではありません。
 

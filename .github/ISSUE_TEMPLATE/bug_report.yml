@@ -34,6 +34,12 @@ body:
         - OpenAI Codex
         - Qwen Cloud
         - OpenCode Go
+        - Claude (Experimental)
+        - Antigravity (Experimental)
+        - GitHub Copilot (Experimental)
+        - Cursor (Experimental)
+        - Z.AI GLM (Experimental)
+        - Kimi Code (Experimental)
         - Multiple providers / application UI
     validations:
       required: true

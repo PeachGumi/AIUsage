@@ -1,6 +1,7 @@
 import XCTest
 @testable import AIUsage
 
+@MainActor
 final class MajorProviderTests: XCTestCase {
     func testUsageWindowAllowsIndependentLanesWithSameCadence() throws {
         let first = try UsageWindow(
@@ -55,7 +56,8 @@ final class MajorProviderTests: XCTestCase {
     }
 
     func testAntigravityParsesTwoQuotaFamiliesAndCadences() throws {
-        let data = Data(#"{
+        let data = Data(#"""
+        {
           "groups":[
             {"displayName":"Gemini Models","buckets":[
               {"bucketId":"gemini-5h","displayName":"5-hour Limit","remaining":{"remainingFraction":0.91},"resetTime":"2026-08-28T12:00:00Z"},
@@ -66,7 +68,8 @@ final class MajorProviderTests: XCTestCase {
               {"bucketId":"third-weekly","displayName":"Weekly Limit","remaining":{"remainingFraction":0.64}}
             ]}
           ]
-        }"#.utf8)
+        }
+        """#.utf8)
 
         let snapshot = try AntigravityProvider.parseQuotaSummary(data: data)
 
@@ -91,7 +94,8 @@ final class MajorProviderTests: XCTestCase {
     }
 
     func testCopilotParsesDirectQuotaSnapshots() throws {
-        let data = Data(#"{
+        let data = Data(#"""
+        {
           "copilot_plan":"pro",
           "token_based_billing":false,
           "quota_reset_date":"2026-09-01",
@@ -99,7 +103,8 @@ final class MajorProviderTests: XCTestCase {
             "premium_interactions":{"entitlement":1000,"remaining":750,"percent_remaining":75,"quota_id":"premium"},
             "chat":{"entitlement":500,"remaining":400,"percent_remaining":80,"quota_id":"chat"}
           }
-        }"#.utf8)
+        }
+        """#.utf8)
 
         let snapshot = try CopilotProvider.parseUsage(data: data)
 
@@ -109,11 +114,13 @@ final class MajorProviderTests: XCTestCase {
     }
 
     func testCopilotSupportsLegacyMonthlyQuotaFallbackWithoutInventingMissingDenominators() throws {
-        let valid = Data(#"{
+        let valid = Data(#"""
+        {
           "copilot_plan":"individual",
           "monthly_quotas":{"chat":100,"completions":200},
           "limited_user_quotas":{"chat":25,"completions":100}
-        }"#.utf8)
+        }
+        """#.utf8)
         let snapshot = try CopilotProvider.parseUsage(data: valid)
         XCTAssertEqual(Set(snapshot.windows.map(\.usedPercent)), Set([50, 75]))
 
@@ -122,11 +129,13 @@ final class MajorProviderTests: XCTestCase {
     }
 
     func testCursorParsesIndependentMonthlyPools() throws {
-        let data = Data(#"{
+        let data = Data(#"""
+        {
           "billingCycleEnd":"2026-09-15T00:00:00Z",
           "membershipType":"pro",
           "individualUsage":{"plan":{"used":1200,"limit":2000,"autoPercentUsed":12.5,"apiPercentUsed":42,"totalPercentUsed":60}}
-        }"#.utf8)
+        }
+        """#.utf8)
 
         let snapshot = try CursorProvider.parseUsage(data: data)
 
@@ -140,14 +149,16 @@ final class MajorProviderTests: XCTestCase {
     }
 
     func testZAIParsesOnlyRecognizedCodingPlanTokenWindows() throws {
-        let data = Data(#"{
+        let data = Data(#"""
+        {
           "success":true,"code":200,
           "data":{"planName":"Lite","limits":[
             {"type":"TOKENS_LIMIT","unit":5,"number":300,"percentage":25,"nextResetTime":1787900000000},
             {"type":"TOKENS_LIMIT","unit":6,"number":1,"percentage":40,"nextResetTime":1788000000000},
             {"type":"TIME_LIMIT","unit":5,"number":1,"percentage":70}
           ]}
-        }"#.utf8)
+        }
+        """#.utf8)
 
         let snapshot = try ZAIProvider.parseUsage(data: data)
 
@@ -162,15 +173,17 @@ final class MajorProviderTests: XCTestCase {
     }
 
     func testKimiParsesWeeklyAndRollingFiveHourQuota() throws {
-        let data = Data(#"{
+        let data = Data(#"""
+        {
           "usage":{"limit":"2048","used":"214","remaining":"1834","resetTime":"2026-09-01T00:00:00Z"},
           "limits":[{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},"detail":{"limit":"200","used":"139","remaining":"61","resetTime":"2026-08-28T13:00:00Z"}}]
-        }"#.utf8)
+        }
+        """#.utf8)
 
         let snapshot = try KimiProvider.parseUsage(data: data)
 
         XCTAssertEqual(snapshot.windows.map(\.kind), [.fiveHour, .weekly])
-        XCTAssertEqual(snapshot.windows.first?.usedPercent, 69.5, accuracy: 0.0001)
+        XCTAssertEqual(snapshot.windows.first?.usedPercent ?? -1, 69.5, accuracy: 0.0001)
         XCTAssertEqual(snapshot.windows.last?.usedPercent ?? 0, 214.0 / 2048.0 * 100, accuracy: 0.0001)
     }
 
