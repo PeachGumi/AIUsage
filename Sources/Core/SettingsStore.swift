@@ -58,9 +58,15 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Provider types are a catalog, not unique registrations. Every type stays
-    /// in the Add menu no matter how many account instances already exist.
-    var addableProviders: [ProviderID] { ProviderID.implemented }
+    /// Most provider integrations support a stable default/ambient account plus
+    /// explicitly configured duplicate accounts. Antigravity is intentionally
+    /// limited to one local official session until its documented status-line
+    /// interface is wired up for safe multi-account ingestion.
+    var addableProviders: [ProviderID] {
+        ProviderID.implemented.filter { provider in
+            provider != .antigravity || !registeredProviders.contains(where: { $0.provider == .antigravity })
+        }
+    }
 
     var selectedProvider: ProviderInstance? {
         guard let selectedProviderInstanceID else { return nil }
@@ -69,7 +75,7 @@ final class SettingsStore: ObservableObject {
 
     @discardableResult
     func addProvider(_ provider: ProviderID) -> ProviderInstance? {
-        guard ProviderID.implemented.contains(provider) else { return nil }
+        guard addableProviders.contains(provider) else { return nil }
         let matching = registeredProviders.indices.filter { registeredProviders[$0].provider == provider }
 
         // Keep a single account visually clean. As soon as a second account is
@@ -97,7 +103,11 @@ final class SettingsStore: ObservableObject {
             label = "Account \(ordinal)"
         }
 
-        let instance = ProviderInstance(provider: provider, accountLabel: label)
+        // The first card is a stable default slot. This preserves old migration
+        // identities and lets AppDelegate permit ambient client credentials only
+        // for that one slot. Additional cards always receive independent UUIDs.
+        let id = matching.isEmpty ? ProviderInstance.legacyID(for: provider) : UUID()
+        let instance = ProviderInstance(id: id, provider: provider, accountLabel: label)
         registeredProviders.append(instance)
         if selectedProviderInstanceID == nil { selectedProviderInstanceID = instance.id }
         return instance
@@ -157,7 +167,16 @@ final class SettingsStore: ObservableObject {
     private static func sanitized(_ instances: [ProviderInstance]) -> [ProviderInstance] {
         let implemented = Set(ProviderID.implemented)
         var seen = Set<UUID>()
-        return instances.filter { implemented.contains($0.provider) && seen.insert($0.id).inserted }
+        var keptAntigravity = false
+        return instances.filter { instance in
+            guard implemented.contains(instance.provider), seen.insert(instance.id).inserted else { return false }
+            if instance.provider == .antigravity {
+                guard !keptAntigravity,
+                      instance.id == ProviderInstance.legacyID(for: .antigravity) else { return false }
+                keptAntigravity = true
+            }
+            return true
+        }
     }
 
     private static func automaticAccountOrdinal(_ label: String?) -> Int? {
