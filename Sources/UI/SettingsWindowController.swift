@@ -33,11 +33,11 @@ private struct SettingsView: View {
         Form {
             Section("Menu Bar") {
                 if settings.registeredProviders.isEmpty {
-                    LabeledContent("Displayed service", value: "No providers added")
+                    LabeledContent("Displayed account", value: "No provider accounts added")
                 } else {
-                    Picker("Displayed service", selection: $settings.selectedProvider) {
-                        ForEach(settings.registeredProviders) { provider in
-                            Text(provider.displayName).tag(Optional(provider))
+                    Picker("Displayed account", selection: $settings.selectedProviderInstanceID) {
+                        ForEach(settings.registeredProviders) { instance in
+                            Text(instance.title).tag(Optional(instance.id))
                         }
                     }
                 }
@@ -48,7 +48,7 @@ private struct SettingsView: View {
             }
             Section("Updates") {
                 LabeledContent("Refresh interval", value: "5 minutes")
-                Text("Only providers you add from the menu-bar popover are refreshed in the background.")
+                Text("Every account card is refreshed independently, including multiple accounts of the same provider.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
