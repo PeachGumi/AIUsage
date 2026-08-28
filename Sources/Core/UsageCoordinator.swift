@@ -12,10 +12,6 @@ extension UsageProvider {
     func cancelActiveFetch() {}
 }
 
-/// Provider-specific errors can opt into this protocol without making Core
-/// depend on concrete provider error enums. Authentication state therefore
-/// survives ordinary network/upstream failures instead of being inferred from
-/// the presence of any error string.
 protocol ProviderAuthenticationError: Error {
     var requiresAuthentication: Bool { get }
 }
@@ -59,8 +55,6 @@ final class UsageCoordinator: ObservableObject {
         setEnabledProviders(instances)
     }
 
-    /// Test/backward-compatible initializer for one runtime per provider type.
-    /// It creates synthetic instance IDs and should not be used by the app.
     convenience init(providers: [any UsageProvider], enabledProviders: [ProviderID]? = nil) {
         let allowed = enabledProviders.map(Set.init)
         let pairs = providers.compactMap { provider -> (ProviderInstance, any UsageProvider)? in
@@ -76,9 +70,6 @@ final class UsageCoordinator: ObservableObject {
         }
     }
 
-    /// Reconciles the live runtime set with the user's account/card instances.
-    /// Removing one duplicate only cancels and clears that UUID; sibling
-    /// instances of the same ProviderID remain completely independent.
     func setEnabledProviders(_ nextInstances: [ProviderInstance]) {
         let nextByID = Dictionary(uniqueKeysWithValues: nextInstances.map { ($0.id, $0) })
         let nextIDs = Set(nextByID.keys)
@@ -99,8 +90,6 @@ final class UsageCoordinator: ObservableObject {
 
         for id in retained {
             guard let next = nextByID[id] else { continue }
-            // Provider type is immutable for normal instances. Defensively
-            // rebuild if persisted/corrupt state ever changes it for a UUID.
             if instances[id]?.provider != next.provider {
                 generations[id, default: 0] += 1
                 providers[id]?.cancelActiveFetch()
@@ -123,8 +112,19 @@ final class UsageCoordinator: ObservableObject {
         enabledInstanceIDs = nextIDs
     }
 
-    /// Starts every registered account independently so a slow provider/account
-    /// cannot delay any sibling, including another account of the same service.
+    /// Recreate one provider runtime after its credential source changes. This
+    /// invalidates only that account; duplicate sibling accounts are untouched.
+    func rebuildProvider(_ instanceID: UUID) {
+        guard enabledInstanceIDs.contains(instanceID), let instance = instances[instanceID] else { return }
+        generations[instanceID, default: 0] += 1
+        providers[instanceID]?.cancelActiveFetch()
+        providers[instanceID] = providerFactory(instance)
+        snapshots.removeValue(forKey: instanceID)
+        errors.removeValue(forKey: instanceID)
+        refreshing.remove(instanceID)
+        authenticationStates[instanceID] = .unknown
+    }
+
     func refreshAll() async {
         guard !refreshAllInProgress else { return }
         refreshAllInProgress = true
@@ -134,13 +134,9 @@ final class UsageCoordinator: ObservableObject {
         }
 
         let tasks = enabledInstanceIDs.map { id in
-            Task { @MainActor [weak self] in
-                await self?.refresh(id)
-            }
+            Task { @MainActor [weak self] in await self?.refresh(id) }
         }
-        for task in tasks {
-            await task.value
-        }
+        for task in tasks { await task.value }
     }
 
     func refresh(_ instanceID: UUID) async {
@@ -169,20 +165,14 @@ final class UsageCoordinator: ObservableObject {
                     requiresAuthentication: authError?.requiresAuthentication == true)))
         }
 
-        // A newer refresh, removal, or sign-out superseded this account fetch.
         guard generations[instanceID] == generation,
               enabledInstanceIDs.contains(instanceID) else { return }
         apply(outcome)
         refreshing.remove(instanceID)
     }
 
-    func provider(_ instanceID: UUID) -> (any UsageProvider)? {
-        providers[instanceID]
-    }
-
-    func instance(_ instanceID: UUID) -> ProviderInstance? {
-        instances[instanceID]
-    }
+    func provider(_ instanceID: UUID) -> (any UsageProvider)? { providers[instanceID] }
+    func instance(_ instanceID: UUID) -> ProviderInstance? { instances[instanceID] }
 
     func markSignedOut(_ instanceID: UUID, message: String) {
         generations[instanceID, default: 0] += 1
@@ -212,9 +202,6 @@ final class UsageCoordinator: ObservableObject {
             if error.requiresAuthentication {
                 authenticationStates[outcome.instanceID] = .required
             }
-            // Transient failures intentionally leave the previous auth state
-            // untouched. A timeout/429/5xx must not turn a Sign out control into
-            // a misleading Sign in control while stale usage is still visible.
         }
     }
 }
