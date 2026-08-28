@@ -105,17 +105,20 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
     /// user's already-authenticated WebKit session across this migration.
     static func legacyID(for provider: ProviderID) -> UUID {
         let suffix: String = switch provider {
-        case .openCodeGo: "000001"
-        case .qwen: "000002"
-        case .codex: "000003"
-        case .claude: "000004"
-        case .antigravity: "000005"
-        case .copilot: "000006"
-        case .cursor: "000007"
-        case .zai: "000008"
-        case .kimi: "000009"
+        case .openCodeGo: "000000000001"
+        case .qwen: "000000000002"
+        case .codex: "000000000003"
+        case .claude: "000000000004"
+        case .antigravity: "000000000005"
+        case .copilot: "000000000006"
+        case .cursor: "000000000007"
+        case .zai: "000000000008"
+        case .kimi: "000000000009"
         }
-        return UUID(uuidString: "A1A6E000-0000-4000-8000-\(suffix)")!
+        guard let id = UUID(uuidString: "A1A6E000-0000-4000-8000-\(suffix)") else {
+            preconditionFailure("Internal legacy provider UUID is invalid")
+        }
+        return id
     }
 
     private static func cleanedLabel(_ value: String?) -> String? {
