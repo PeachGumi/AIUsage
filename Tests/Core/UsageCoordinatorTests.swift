@@ -117,6 +117,23 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.authenticationStates[second.id], .authenticated)
     }
 
+    func testCoordinatorIgnoresDuplicateInstanceIdentityInsteadOfTrapping() async {
+        let id = UUID()
+        let first = ProviderInstance(id: id, provider: .codex, accountLabel: "First")
+        let duplicate = ProviderInstance(id: id, provider: .qwen, accountLabel: "Duplicate")
+        var factoryCalls = 0
+        let coordinator = UsageCoordinator(instances: [first, duplicate]) { instance in
+            factoryCalls += 1
+            return CountingProvider(id: instance.provider, used: 44)
+        }
+
+        await coordinator.refreshAll()
+
+        XCTAssertEqual(factoryCalls, 1)
+        XCTAssertEqual(coordinator.instance(id)?.provider, .codex)
+        XCTAssertEqual(coordinator.snapshots[id]?.provider, .codex)
+    }
+
     func testExplicitlyEmptyRegistrationCreatesNoProviderRuntime() async {
         var factoryCalls = 0
         let coordinator = UsageCoordinator(instances: []) { instance in
