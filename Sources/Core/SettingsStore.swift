@@ -77,6 +77,8 @@ final class SettingsStore: ObservableObject {
     func addProvider(_ provider: ProviderID) -> ProviderInstance? {
         guard addableProviders.contains(provider) else { return nil }
         let matching = registeredProviders.indices.filter { registeredProviders[$0].provider == provider }
+        let defaultID = ProviderInstance.legacyID(for: provider)
+        let hasDefaultSlot = matching.contains { registeredProviders[$0].id == defaultID }
 
         // Keep a single account visually clean. As soon as a second account is
         // added, give the original a deterministic local label so two identical
@@ -103,10 +105,10 @@ final class SettingsStore: ObservableObject {
             label = "Account \(ordinal)"
         }
 
-        // The first card is a stable default slot. This preserves old migration
-        // identities and lets AppDelegate permit ambient client credentials only
-        // for that one slot. Additional cards always receive independent UUIDs.
-        let id = matching.isEmpty ? ProviderInstance.legacyID(for: provider) : UUID()
+        // The stable default slot is unique but recoverable: if it was removed
+        // while explicit sibling accounts remain, adding the provider again
+        // restores that same default UUID so ambient client auth remains usable.
+        let id = hasDefaultSlot ? UUID() : defaultID
         let instance = ProviderInstance(id: id, provider: provider, accountLabel: label)
         registeredProviders.append(instance)
         if selectedProviderInstanceID == nil { selectedProviderInstanceID = instance.id }
