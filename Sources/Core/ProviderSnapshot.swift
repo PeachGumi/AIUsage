@@ -13,10 +13,9 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// Providers exposed in the Add Provider UI. Keep this separate from
-    /// `allCases` so future provider IDs / experimental integrations can exist
-    /// in code without becoming user-selectable before their implementation is
-    /// tested and ready.
+    /// Providers exposed in the Add Provider UI. Experimental providers are
+    /// intentionally visible so users can validate them and contribute fixes;
+    /// their status is surfaced explicitly in the UI and documentation.
     static let implemented: [ProviderID] = [
         .openCodeGo,
         .codex,
@@ -54,6 +53,19 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         case .cursor: "CU"
         case .zai: "ZA"
         case .kimi: "KM"
+        }
+    }
+
+    /// Only Codex and OpenCode Go have been validated against real maintainer
+    /// accounts. Every other integration is contract/fixture-tested but remains
+    /// experimental until real-account users confirm it against the provider's
+    /// official usage display and contribute any required fixes.
+    var isExperimental: Bool {
+        switch self {
+        case .openCodeGo, .codex:
+            false
+        case .qwen, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
+            true
         }
     }
 
