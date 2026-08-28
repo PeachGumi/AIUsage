@@ -25,13 +25,12 @@ final class QwenCookieRepository {
         self.defaults = defaults
         self.legacyURL = legacyURL ?? FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/QwenUsage/saved_cookies.txt")
-        self.ignoreLegacyKey = "qwen.\(namespace).ignoreLegacyCookie"
+        self.ignoreLegacyKey = namespace == "default"
+            ? "qwen.ignoreLegacyCookie"
+            : "qwen.\(namespace).ignoreLegacyCookie"
         self.allowsLegacyMigration = allowsLegacyMigration
     }
 
-    /// Cookie header for `url`. Legacy QwenUsage cookie import is allowed only
-    /// for the migration/default profile. New account instances never inherit a
-    /// plaintext legacy cookie, which would collapse them onto the same account.
     func header(for url: URL) async throws -> String {
         let cookies = await cookies(matching: url)
         let header = cookies
