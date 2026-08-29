@@ -27,11 +27,6 @@ struct ProviderFailure: Error, Equatable, Sendable {
     let requiresAuthentication: Bool
 }
 
-struct ProviderFetchOutcome: Sendable {
-    let instanceID: UUID
-    let result: Result<ProviderSnapshot, ProviderFailure>
-}
-
 @MainActor
 final class UsageCoordinator: ObservableObject {
     @Published private(set) var snapshots: [UUID: ProviderSnapshot] = [:]
@@ -58,7 +53,7 @@ final class UsageCoordinator: ObservableObject {
     convenience init(providers: [any UsageProvider], enabledProviders: [ProviderID]? = nil) {
         let allowed = enabledProviders.map(Set.init)
         let pairs = providers.compactMap { provider -> (ProviderInstance, any UsageProvider)? in
-            if let allowed, !allowed.contains(provider.id) { return nil }
+            guard allowed?.contains(provider.id) != false else { return nil }
             return (ProviderInstance(provider: provider.id), provider)
         }
         let runtimes = Dictionary(uniqueKeysWithValues: pairs.map { ($0.0.id, $0.1) })
@@ -71,66 +66,34 @@ final class UsageCoordinator: ObservableObject {
     }
 
     func setEnabledProviders(_ nextInstances: [ProviderInstance]) {
-        // SettingsStore already sanitizes persisted UUIDs, but keep the
-        // coordinator defensive because callers/tests can supply instances
-        // directly. First occurrence wins, matching SettingsStore migration
-        // behavior, instead of Dictionary(uniqueKeysWithValues:) trapping.
-        var nextByID: [UUID: ProviderInstance] = [:]
-        for instance in nextInstances where nextByID[instance.id] == nil {
-            nextByID[instance.id] = instance
-        }
-
+        let nextByID = Self.uniqueInstances(nextInstances)
         let nextIDs = Set(nextByID.keys)
-        let removed = enabledInstanceIDs.subtracting(nextIDs)
-        let added = nextIDs.subtracting(enabledInstanceIDs)
-        let retained = enabledInstanceIDs.intersection(nextIDs)
 
-        for id in removed {
-            generations[id, default: 0] += 1
-            providers[id]?.cancelActiveFetch()
-            providers.removeValue(forKey: id)
-            instances.removeValue(forKey: id)
-            snapshots.removeValue(forKey: id)
-            errors.removeValue(forKey: id)
-            refreshing.remove(id)
-            authenticationStates.removeValue(forKey: id)
+        for id in enabledInstanceIDs.subtracting(nextIDs) {
+            removeRuntime(id)
         }
 
-        for id in retained {
+        for id in enabledInstanceIDs.intersection(nextIDs) {
             guard let next = nextByID[id] else { continue }
             if instances[id]?.provider != next.provider {
-                generations[id, default: 0] += 1
-                providers[id]?.cancelActiveFetch()
-                providers[id] = providerFactory(next)
-                snapshots.removeValue(forKey: id)
-                errors.removeValue(forKey: id)
-                refreshing.remove(id)
-                authenticationStates[id] = .unknown
+                replaceRuntime(id, with: next)
+            } else {
+                instances[id] = next
             }
-            instances[id] = next
         }
 
-        for id in added {
+        for id in nextIDs.subtracting(enabledInstanceIDs) {
             guard let instance = nextByID[id] else { continue }
-            instances[id] = instance
-            providers[id] = providerFactory(instance)
-            authenticationStates[id] = .unknown
+            installRuntime(instance)
         }
 
         enabledInstanceIDs = nextIDs
     }
 
-    /// Recreate one provider runtime after its credential source changes. This
-    /// invalidates only that account; duplicate sibling accounts are untouched.
     func rebuildProvider(_ instanceID: UUID) {
-        guard enabledInstanceIDs.contains(instanceID), let instance = instances[instanceID] else { return }
-        generations[instanceID, default: 0] += 1
-        providers[instanceID]?.cancelActiveFetch()
-        providers[instanceID] = providerFactory(instance)
-        snapshots.removeValue(forKey: instanceID)
-        errors.removeValue(forKey: instanceID)
-        refreshing.remove(instanceID)
-        authenticationStates[instanceID] = .unknown
+        guard enabledInstanceIDs.contains(instanceID),
+              let instance = instances[instanceID] else { return }
+        replaceRuntime(instanceID, with: instance)
     }
 
     func refreshAll() async {
@@ -150,32 +113,20 @@ final class UsageCoordinator: ObservableObject {
     func refresh(_ instanceID: UUID) async {
         guard enabledInstanceIDs.contains(instanceID),
               let provider = providers[instanceID] else { return }
-        generations[instanceID, default: 0] += 1
-        let generation = generations[instanceID]!
-        refreshing.insert(instanceID)
-        provider.cancelActiveFetch()
 
-        let outcome: ProviderFetchOutcome
+        let generation = beginFetch(instanceID, provider: provider)
+        let result: Result<ProviderSnapshot, ProviderFailure>
         do {
-            outcome = ProviderFetchOutcome(
-                instanceID: instanceID,
-                result: .success(try await provider.fetch()))
+            result = .success(try await provider.fetch())
         } catch is CancellationError {
-            outcome = ProviderFetchOutcome(
-                instanceID: instanceID,
-                result: .failure(ProviderFailure(message: "Cancelled", requiresAuthentication: false)))
+            result = .failure(ProviderFailure(message: "Cancelled", requiresAuthentication: false))
         } catch {
-            let authError = error as? any ProviderAuthenticationError
-            outcome = ProviderFetchOutcome(
-                instanceID: instanceID,
-                result: .failure(ProviderFailure(
-                    message: error.localizedDescription,
-                    requiresAuthentication: authError?.requiresAuthentication == true)))
+            result = .failure(Self.failure(from: error))
         }
 
         guard generations[instanceID] == generation,
               enabledInstanceIDs.contains(instanceID) else { return }
-        apply(outcome)
+        apply(result, to: instanceID)
         refreshing.remove(instanceID)
     }
 
@@ -183,11 +134,9 @@ final class UsageCoordinator: ObservableObject {
     func instance(_ instanceID: UUID) -> ProviderInstance? { instances[instanceID] }
 
     func markSignedOut(_ instanceID: UUID, message: String) {
-        generations[instanceID, default: 0] += 1
-        providers[instanceID]?.cancelActiveFetch()
+        invalidateFetch(instanceID)
         snapshots.removeValue(forKey: instanceID)
         errors[instanceID] = message
-        refreshing.remove(instanceID)
         if enabledInstanceIDs.contains(instanceID) {
             authenticationStates[instanceID] = .required
         }
@@ -195,21 +144,73 @@ final class UsageCoordinator: ObservableObject {
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
         guard !refreshAllInProgress else { return }
-        if let last = lastRefreshAllAt, Date().timeIntervalSince(last) < interval { return }
+        if let lastRefreshAllAt,
+           Date().timeIntervalSince(lastRefreshAllAt) < interval { return }
         await refreshAll()
     }
 
-    private func apply(_ outcome: ProviderFetchOutcome) {
-        switch outcome.result {
+    private func installRuntime(_ instance: ProviderInstance) {
+        instances[instance.id] = instance
+        providers[instance.id] = providerFactory(instance)
+        authenticationStates[instance.id] = .unknown
+    }
+
+    private func replaceRuntime(_ id: UUID, with instance: ProviderInstance) {
+        invalidateFetch(id)
+        instances[id] = instance
+        providers[id] = providerFactory(instance)
+        snapshots.removeValue(forKey: id)
+        errors.removeValue(forKey: id)
+        authenticationStates[id] = .unknown
+    }
+
+    private func removeRuntime(_ id: UUID) {
+        invalidateFetch(id)
+        providers.removeValue(forKey: id)
+        instances.removeValue(forKey: id)
+        snapshots.removeValue(forKey: id)
+        errors.removeValue(forKey: id)
+        authenticationStates.removeValue(forKey: id)
+    }
+
+    private func beginFetch(_ id: UUID, provider: any UsageProvider) -> Int {
+        invalidateFetch(id)
+        refreshing.insert(id)
+        return generations[id, default: 0]
+    }
+
+    private func invalidateFetch(_ id: UUID) {
+        generations[id, default: 0] += 1
+        providers[id]?.cancelActiveFetch()
+        refreshing.remove(id)
+    }
+
+    private func apply(
+        _ result: Result<ProviderSnapshot, ProviderFailure>,
+        to instanceID: UUID
+    ) {
+        switch result {
         case let .success(snapshot):
-            snapshots[outcome.instanceID] = snapshot
-            errors.removeValue(forKey: outcome.instanceID)
-            authenticationStates[outcome.instanceID] = .authenticated
+            snapshots[instanceID] = snapshot
+            errors.removeValue(forKey: instanceID)
+            authenticationStates[instanceID] = .authenticated
         case let .failure(error):
-            errors[outcome.instanceID] = error.message
+            errors[instanceID] = error.message
             if error.requiresAuthentication {
-                authenticationStates[outcome.instanceID] = .required
+                authenticationStates[instanceID] = .required
             }
+        }
+    }
+
+    private static func failure(from error: Error) -> ProviderFailure {
+        ProviderFailure(
+            message: error.localizedDescription,
+            requiresAuthentication: (error as? any ProviderAuthenticationError)?.requiresAuthentication == true)
+    }
+
+    private static func uniqueInstances(_ values: [ProviderInstance]) -> [UUID: ProviderInstance] {
+        values.reduce(into: [:]) { result, instance in
+            if result[instance.id] == nil { result[instance.id] = instance }
         }
     }
 }
