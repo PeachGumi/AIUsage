@@ -77,13 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         loginControllers.removeValue(forKey: instanceID)?.close()
-        let qwenRepository = qwenRepositories.removeValue(forKey: instanceID)
-        let openCodeStore = openCodeStores.removeValue(forKey: instanceID)
         removeDedicatedWebState(
             for: instance,
-            qwenRepository: qwenRepository,
-            openCodeStore: openCodeStore)
-
+            qwenRepository: qwenRepositories.removeValue(forKey: instanceID),
+            openCodeStore: openCodeStores.removeValue(forKey: instanceID))
         ProviderInstanceAccountStore.clearCredentialPath(for: instanceID)
         settings.removeProvider(instanceID)
         syncProviders()
@@ -94,16 +91,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         qwenRepository: QwenCookieRepository?,
         openCodeStore: OpenCodeWorkspaceStore?
     ) {
-        guard !instance.isLegacyMigratedInstance else { return }
+        guard !instance.isDefaultSlot else { return }
 
         switch instance.provider {
         case .qwen:
             scheduleWebsiteDataRemoval(qwenRepository?.dataStore ?? websiteDataStore(for: instance))
         case .openCodeGo:
-            let store = openCodeStore ?? OpenCodeWorkspaceStore(
+            (openCodeStore ?? OpenCodeWorkspaceStore(
                 namespace: instance.id.uuidString,
-                allowsLegacyMigration: false)
-            store.clear()
+                allowsLegacyMigration: false)).clear()
             scheduleWebsiteDataRemoval(websiteDataStore(for: instance))
         case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
             break
@@ -179,7 +175,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 instance,
                 missingMessage: "Set a GitHub token with Account… before refreshing this Copilot account.",
                 defaultProvider: { CopilotProvider() },
-                configuredProvider: { InstanceCopilotProvider(token: $0) })
+                configuredProvider: { token in
+                    CopilotProvider(tokenLoader: { () async throws -> String in token })
+                })
 
         case .cursor:
             return secretBackedProvider(
@@ -191,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .zai:
             return ZAIProvider(keyLoader: {
                 if let value = try ProviderInstanceAccountStore.secret(for: instance) { return value }
-                guard instance.isLegacyMigratedInstance else { return nil }
+                guard instance.isDefaultSlot else { return nil }
                 return try Self.defaultZAIKey()
             })
 
@@ -217,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let path = ProviderInstanceAccountStore.credentialPath(for: instance.id) {
             return configuredProvider(URL(fileURLWithPath: path))
         }
-        return instance.isLegacyMigratedInstance
+        return instance.isDefaultSlot
             ? defaultProvider()
             : missingAccountProvider(instance, message: missingMessage)
     }
@@ -232,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let secret = try ProviderInstanceAccountStore.secret(for: instance) {
                 return configuredProvider(secret)
             }
-            return instance.isLegacyMigratedInstance
+            return instance.isDefaultSlot
                 ? defaultProvider()
                 : missingAccountProvider(instance, message: missingMessage)
         } catch {
@@ -259,85 +257,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureOrLogin(_ instanceID: UUID) {
         guard let instance = settings.instance(instanceID) else { return }
-
-        if let prompt = secretPrompt(for: instance) {
-            promptForSecret(
-                instance,
-                title: prompt.title,
-                placeholder: prompt.placeholder,
-                explanation: prompt.explanation)
-            return
-        }
-        if let prompt = credentialFilePrompt(for: instance) {
-            chooseCredentialFile(instance, title: prompt.title, message: prompt.message)
-            return
-        }
+        let isDefault = instance.isDefaultSlot
 
         switch instance.provider {
         case .openCodeGo, .qwen:
             showWebLogin(instance)
-        case .antigravity:
-            showAntigravityAccountInfo()
-        case .codex, .claude, .copilot, .cursor, .zai, .kimi:
-            break
-        }
-    }
-
-    private func secretPrompt(
-        for instance: ProviderInstance
-    ) -> (title: String, placeholder: String, explanation: String)? {
-        let isDefault = instance.isLegacyMigratedInstance
-        switch instance.provider {
         case .zai:
-            return (
-                "Set Z.AI Coding Plan API key",
-                "Z_AI_API_KEY",
-                "Stored only in macOS Keychain for this account slot and sent only to api.z.ai.")
+            promptForSecret(
+                instance,
+                title: "Set Z.AI Coding Plan API key",
+                placeholder: "Z_AI_API_KEY",
+                explanation: "Stored only in macOS Keychain for this account slot and sent only to api.z.ai.")
         case .kimi:
-            return (
-                "Set Kimi Code API key",
-                "KIMI_CODE_API_KEY",
-                isDefault
+            promptForSecret(
+                instance,
+                title: "Set Kimi Code API key",
+                placeholder: "KIMI_CODE_API_KEY",
+                explanation: isDefault
                     ? "The key is stored only in macOS Keychain. Clear it to use the normal Kimi CLI/environment login."
                     : "This duplicate card requires its own API key, stored only in macOS Keychain.")
         case .copilot:
-            return (
-                "Set GitHub token for this Copilot account",
-                "GitHub token",
-                isDefault
+            promptForSecret(
+                instance,
+                title: "Set GitHub token for this Copilot account",
+                placeholder: "GitHub token",
+                explanation: isDefault
                     ? "The token is stored only in macOS Keychain. Clear it to use the normal GitHub CLI/environment login."
                     : "This duplicate card requires its own GitHub token, stored only in macOS Keychain.")
         case .cursor:
-            return (
-                "Set Cursor access token for this account",
-                "Cursor JWT access token",
-                isDefault
+            promptForSecret(
+                instance,
+                title: "Set Cursor access token for this account",
+                placeholder: "Cursor JWT access token",
+                explanation: isDefault
                     ? "The token is stored only in macOS Keychain. Clear it to use Cursor.app's current login."
                     : "This duplicate card requires its own Cursor access token, stored only in macOS Keychain.")
-        case .openCodeGo, .qwen, .codex, .claude, .antigravity:
-            return nil
-        }
-    }
-
-    private func credentialFilePrompt(
-        for instance: ProviderInstance
-    ) -> (title: String, message: String)? {
-        let isDefault = instance.isLegacyMigratedInstance
-        switch instance.provider {
         case .codex:
-            return (
-                "Choose this Codex account's auth.json",
-                isDefault
+            chooseCredentialFile(
+                instance,
+                title: "Choose this Codex account's auth.json",
+                message: isDefault
                     ? "Choose an auth.json for this card, or use the normal Codex profile. AIUsage reads the file in place and never modifies it."
                     : "This duplicate card requires an auth.json from a separate Codex profile. AIUsage reads it in place and never modifies it.")
         case .claude:
-            return (
-                "Choose this Claude account's credentials file",
-                isDefault
+            chooseCredentialFile(
+                instance,
+                title: "Choose this Claude account's credentials file",
+                message: isDefault
                     ? "Choose a Claude Code credentials file for this card, or use the normal Claude profile. AIUsage reads the file in place and never modifies it."
                     : "This duplicate card requires a separate Claude Code credentials file. AIUsage reads it in place and never modifies it.")
-        case .openCodeGo, .qwen, .antigravity, .copilot, .cursor, .zai, .kimi:
-            return nil
+        case .antigravity:
+            showAntigravityAccountInfo()
         }
     }
 
@@ -366,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.informativeText = explanation
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: instance.isLegacyMigratedInstance ? "Use default" : "Clear")
+        alert.addButton(withTitle: instance.isDefaultSlot ? "Use default" : "Clear")
         alert.addButton(withTitle: "Cancel")
 
         do {
@@ -389,7 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         choice.messageText = title
         choice.informativeText = message
         choice.addButton(withTitle: "Choose file…")
-        choice.addButton(withTitle: instance.isLegacyMigratedInstance ? "Use default" : "Clear selection")
+        choice.addButton(withTitle: instance.isDefaultSlot ? "Use default" : "Clear selection")
         choice.addButton(withTitle: "Cancel")
 
         switch choice.runModal() {
@@ -425,14 +395,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Web account profiles
 
     private func websiteDataStore(for instance: ProviderInstance) -> WKWebsiteDataStore {
-        instance.isLegacyMigratedInstance ? .default() : WKWebsiteDataStore(forIdentifier: instance.id)
+        instance.isDefaultSlot ? .default() : WKWebsiteDataStore(forIdentifier: instance.id)
     }
 
     private func openCodeStore(for instance: ProviderInstance) -> OpenCodeWorkspaceStore {
         if let existing = openCodeStores[instance.id] { return existing }
         let store = OpenCodeWorkspaceStore(
-            namespace: instance.isLegacyMigratedInstance ? "default" : instance.id.uuidString,
-            allowsLegacyMigration: instance.isLegacyMigratedInstance)
+            namespace: instance.isDefaultSlot ? "default" : instance.id.uuidString,
+            allowsLegacyMigration: instance.isDefaultSlot)
         openCodeStores[instance.id] = store
         return store
     }
@@ -441,8 +411,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let existing = qwenRepositories[instance.id] { return existing }
         let repository = QwenCookieRepository(
             dataStore: websiteDataStore(for: instance),
-            namespace: instance.isLegacyMigratedInstance ? "default" : instance.id.uuidString,
-            allowsLegacyMigration: instance.isLegacyMigratedInstance)
+            namespace: instance.isDefaultSlot ? "default" : instance.id.uuidString,
+            allowsLegacyMigration: instance.isDefaultSlot)
         qwenRepositories[instance.id] = repository
         return repository
     }
@@ -506,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .zai:
             do {
                 try ProviderInstanceAccountStore.deleteSecret(for: instance)
-                if instance.isLegacyMigratedInstance {
+                if instance.isDefaultSlot {
                     try AIUsageSecretStore.delete(account: ZAIProvider.keychainAccount)
                 }
             } catch {
@@ -526,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dataStore: WKWebsiteDataStore,
         sharedDomains: [String]
     ) async {
-        if instance.isLegacyMigratedInstance {
+        if instance.isDefaultSlot {
             await removeWebsiteData(matching: sharedDomains, dataStore: dataStore)
         } else {
             await removeAllWebsiteData(dataStore: dataStore)
@@ -664,34 +634,5 @@ private final class FailingUsageProvider: UsageProvider {
 
     func fetch() async throws -> ProviderSnapshot {
         throw failure
-    }
-}
-
-@MainActor
-private final class InstanceCopilotProvider: UsageProvider {
-    let id: ProviderID = .copilot
-    private let token: String
-    private let session = MajorProviderHTTP.session()
-
-    init(token: String) {
-        self.token = token
-    }
-
-    func fetch() async throws -> ProviderSnapshot {
-        var request = URLRequest(
-            url: URL(string: "https://api.github.com/copilot_internal/user")!,
-            cachePolicy: .reloadIgnoringLocalCacheData,
-            timeoutInterval: 30)
-        request.setValue("token \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("vscode/1.96.2", forHTTPHeaderField: "Editor-Version")
-        request.setValue("copilot-chat/0.26.7", forHTTPHeaderField: "Editor-Plugin-Version")
-        request.setValue("GitHubCopilotChat/0.26.7", forHTTPHeaderField: "User-Agent")
-        request.setValue("2025-04-01", forHTTPHeaderField: "X-Github-Api-Version")
-        let data = try await MajorProviderHTTP.checkedData(
-            for: request,
-            session: session,
-            provider: "GitHub Copilot")
-        return try CopilotProvider.parseUsage(data: data)
     }
 }
