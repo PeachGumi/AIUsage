@@ -65,10 +65,6 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    var managesAuthentication: Bool {
-        accountAction == .signInOut
-    }
-
     var staticDashboardURL: URL? {
         switch self {
         case .openCodeGo: nil
