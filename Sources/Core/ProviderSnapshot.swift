@@ -13,6 +13,9 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    /// Integrations implemented by AIUsage and eligible for the Add Provider UI.
+    /// SettingsStore may further constrain this catalog for providers that do not
+    /// yet have a safe multi-account isolation mechanism (currently Antigravity).
     static let implemented: [ProviderID] = [
         .openCodeGo,
         .codex,
@@ -53,6 +56,9 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
+    /// Only Codex and OpenCode Go have been validated against real maintainer
+    /// accounts. Other integrations remain explicitly Experimental until their
+    /// fixture contracts are confirmed against real provider dashboards.
     var isExperimental: Bool {
         switch self {
         case .openCodeGo, .codex:
@@ -62,6 +68,9 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
+    /// Providers whose primary sign-in/sign-out lifecycle is owned by AIUsage.
+    /// Other integrations may still accept an AIUsage-owned per-card credential,
+    /// but their ambient/default login remains owned by the external client.
     var managesAuthentication: Bool {
         switch self {
         case .openCodeGo, .qwen, .zai:
@@ -74,7 +83,8 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
 /// One dashboard/account slot. ProviderID identifies the integration type;
 /// ProviderInstance.id identifies one independently managed account/card.
-/// Multiple instances of the same provider are intentionally valid.
+/// Multiple instances of the same provider are intentionally valid where the
+/// integration has an isolation mechanism.
 struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
     let id: UUID
     let provider: ProviderID
@@ -91,6 +101,9 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         return "\(provider.displayName) · \(accountLabel)"
     }
 
+    /// Historical name retained because these IDs originated as migration IDs.
+    /// In the current model this means the stable default slot: the one account
+    /// allowed to reuse an ambient external-client login/profile.
     var isLegacyMigratedInstance: Bool {
         id == Self.legacyID(for: provider)
     }
@@ -99,10 +112,10 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         ProviderInstance(id: id, provider: provider, accountLabel: value)
     }
 
-    /// Stable IDs used only when converting the old one-card-per-provider
-    /// representation. They let AppDelegate recognize the migrated Qwen/
-    /// OpenCode card and keep using WKWebsiteDataStore.default(), preserving the
-    /// user's already-authenticated WebKit session across this migration.
+    /// Stable default-slot IDs. The values deliberately match the migration IDs
+    /// from the old one-card-per-provider representation, which preserves existing
+    /// WebKit/default-client state while also giving fresh installs one recoverable
+    /// ambient-auth slot per provider. Additional accounts always use random UUIDs.
     static func legacyID(for provider: ProviderID) -> UUID {
         let suffix: String = switch provider {
         case .openCodeGo: "000000000001"
