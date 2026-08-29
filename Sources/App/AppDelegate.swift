@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeActions() -> AppActions {
         AppActions(
             addProvider: { [weak self] provider in self?.addProvider(provider) },
-            removeProvider: { [weak self] id in self?.removeProvider(id) },
+            removeProvider: { [weak self] id in Task { await self?.removeProvider(id) } },
             renameProvider: { [weak self] id in self?.renameProvider(id) },
             refreshAll: { [weak self] in Task { await self?.coordinator.refreshAll() } },
             refresh: { [weak self] id in Task { await self?.coordinator.refresh(id) } },
@@ -66,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await coordinator.refresh(instance.id) }
     }
 
-    private func removeProvider(_ instanceID: UUID) {
+    private func removeProvider(_ instanceID: UUID) async {
         guard let instance = settings.instance(instanceID) else { return }
 
         do {
@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         loginControllers.removeValue(forKey: instanceID)?.close()
-        removeDedicatedWebState(
+        await removeDedicatedWebState(
             for: instance,
             qwenRepository: qwenRepositories.removeValue(forKey: instanceID),
             openCodeStore: openCodeStores.removeValue(forKey: instanceID))
@@ -90,17 +90,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for instance: ProviderInstance,
         qwenRepository: QwenCookieRepository?,
         openCodeStore: OpenCodeWorkspaceStore?
-    ) {
+    ) async {
         guard !instance.isDefaultSlot else { return }
 
         switch instance.provider {
         case .qwen:
-            scheduleWebsiteDataRemoval(qwenRepository?.dataStore ?? websiteDataStore(for: instance))
+            await removeAllWebsiteData(
+                dataStore: qwenRepository?.dataStore ?? websiteDataStore(for: instance))
         case .openCodeGo:
             (openCodeStore ?? OpenCodeWorkspaceStore(
                 namespace: instance.id.uuidString,
                 allowsLegacyMigration: false)).clear()
-            scheduleWebsiteDataRemoval(websiteDataStore(for: instance))
+            await removeAllWebsiteData(dataStore: websiteDataStore(for: instance))
         case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
             break
         }
@@ -541,10 +542,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
                 modifiedSince: .distantPast) { continuation.resume() }
         }
-    }
-
-    private func scheduleWebsiteDataRemoval(_ dataStore: WKWebsiteDataStore) {
-        Task { [weak self] in await self?.removeAllWebsiteData(dataStore: dataStore) }
     }
 
     private func showError(title: String, error: Error) {
