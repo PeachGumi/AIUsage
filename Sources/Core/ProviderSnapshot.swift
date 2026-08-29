@@ -1,6 +1,6 @@
 import Foundation
 
-enum ProviderAccountAction: Sendable {
+enum ProviderAccountAction: Equatable, Sendable {
     case signInOut
     case apiKey
     case account
