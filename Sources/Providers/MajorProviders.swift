@@ -151,8 +151,9 @@ enum MajorProviderCommand {
             guard process.terminationStatus == 0 else {
                 let message = String(data: errorData, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                throw MajorProviderError.local(
-                    message?.isEmpty == false ? message! : "Command failed: \(executable)")
+                let detail = message.flatMap { $0.isEmpty ? nil : $0 }
+                    ?? "Command failed: \(executable)"
+                throw MajorProviderError.local(detail)
             }
             return String(data: data, encoding: .utf8) ?? ""
         }.value
@@ -583,13 +584,18 @@ private final class AntigravityLoopbackDelegate: NSObject, URLSessionDelegate, U
 final class CopilotProvider: UsageProvider {
     let id: ProviderID = .copilot
     private let session: URLSession
+    private let tokenLoader: () async throws -> String
 
-    init(session: URLSession = MajorProviderHTTP.session()) {
+    init(
+        session: URLSession = MajorProviderHTTP.session(),
+        tokenLoader: @escaping () async throws -> String = { try await CopilotProvider.loadGitHubToken() }
+    ) {
         self.session = session
+        self.tokenLoader = tokenLoader
     }
 
     func fetch() async throws -> ProviderSnapshot {
-        let token = try await Self.loadGitHubToken()
+        let token = try await tokenLoader()
         var request = URLRequest(
             url: URL(string: "https://api.github.com/copilot_internal/user")!,
             cachePolicy: .reloadIgnoringLocalCacheData,
