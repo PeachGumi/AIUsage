@@ -114,7 +114,7 @@ final class UsageCoordinator: ObservableObject {
         guard enabledInstanceIDs.contains(instanceID),
               let provider = providers[instanceID] else { return }
 
-        let generation = beginFetch(instanceID, provider: provider)
+        let generation = beginFetch(instanceID)
         let result: Result<ProviderSnapshot, ProviderFailure>
         do {
             result = .success(try await provider.fetch())
@@ -132,6 +132,10 @@ final class UsageCoordinator: ObservableObject {
 
     func provider(_ instanceID: UUID) -> (any UsageProvider)? { providers[instanceID] }
     func instance(_ instanceID: UUID) -> ProviderInstance? { instances[instanceID] }
+
+    func cancelAll() {
+        for id in enabledInstanceIDs { invalidateFetch(id) }
+    }
 
     func markSignedOut(_ instanceID: UUID, message: String) {
         invalidateFetch(instanceID)
@@ -173,7 +177,7 @@ final class UsageCoordinator: ObservableObject {
         authenticationStates.removeValue(forKey: id)
     }
 
-    private func beginFetch(_ id: UUID, provider: any UsageProvider) -> Int {
+    private func beginFetch(_ id: UUID) -> Int {
         invalidateFetch(id)
         refreshing.insert(id)
         return generations[id, default: 0]
