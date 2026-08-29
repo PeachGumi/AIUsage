@@ -31,6 +31,8 @@ final class SettingsStore: ObservableObject {
         if stored == nil, migrated != nil {
             persistInstances()
             persistSelection()
+        } else if let stored, registeredProviders != stored {
+            persistInstances()
         }
     }
 
@@ -59,8 +61,9 @@ final class SettingsStore: ObservableObject {
     }
 
     func removeProvider(_ instanceID: UUID) {
-        guard registeredProviders.contains(where: { $0.id == instanceID }) else { return }
+        guard let removed = registeredProviders.first(where: { $0.id == instanceID }) else { return }
         registeredProviders.removeAll { $0.id == instanceID }
+        clearAutomaticLabelFromSoleAccount(of: removed.provider)
         if selectedProviderInstanceID == instanceID {
             selectedProviderInstanceID = registeredProviders.first?.id
         }
@@ -97,6 +100,15 @@ final class SettingsStore: ObservableObject {
               let index = matches.first,
               registeredProviders[index].accountLabel == nil else { return }
         registeredProviders[index] = registeredProviders[index].withAccountLabel("Account 1")
+    }
+
+    private func clearAutomaticLabelFromSoleAccount(of provider: ProviderID) {
+        let matches = registeredProviders.indices.filter { registeredProviders[$0].provider == provider }
+        guard matches.count == 1,
+              let index = matches.first,
+              registeredProviders[index].id == ProviderInstance.legacyID(for: provider),
+              Self.automaticAccountOrdinal(registeredProviders[index].accountLabel) == 1 else { return }
+        registeredProviders[index] = registeredProviders[index].withAccountLabel(nil)
     }
 
     private func nextInstanceID(for provider: ProviderID) -> UUID {
@@ -171,12 +183,19 @@ final class SettingsStore: ObservableObject {
         var seenIDs = Set<UUID>()
         var seenSingleAccountProviders = Set<ProviderID>()
 
-        return instances.filter { instance in
+        let filtered = instances.filter { instance in
             guard supported.contains(instance.provider),
                   seenIDs.insert(instance.id).inserted else { return false }
             guard !instance.provider.supportsMultipleAccounts else { return true }
             return instance.id == ProviderInstance.legacyID(for: instance.provider)
                 && seenSingleAccountProviders.insert(instance.provider).inserted
+        }
+        let counts = Dictionary(grouping: filtered, by: \.provider).mapValues(\.count)
+        return filtered.map { instance in
+            guard counts[instance.provider] == 1,
+                  instance.id == ProviderInstance.legacyID(for: instance.provider),
+                  automaticAccountOrdinal(instance.accountLabel) == 1 else { return instance }
+            return instance.withAccountLabel(nil)
         }
     }
 

@@ -134,6 +134,20 @@ final class SettingsStoreTests: XCTestCase {
         }
     }
 
+    func testPersistedSoleDefaultAccountDropsStaleAutomaticLabel() throws {
+        try withDefaultsThrowing { defaults in
+            let instance = ProviderInstance(
+                id: ProviderInstance.legacyID(for: .codex),
+                provider: .codex,
+                accountLabel: "Account 1")
+            defaults.set(try JSONEncoder().encode([instance]), forKey: "providerInstances.v1")
+
+            let store = SettingsStore(defaults: defaults)
+
+            XCTAssertNil(store.instance(instance.id)?.accountLabel)
+        }
+    }
+
     func testRemovingOneDuplicateLeavesSiblingAccountAndSelection() {
         withDefaults { defaults in
             let store = SettingsStore(defaults: defaults)
@@ -141,11 +155,12 @@ final class SettingsStoreTests: XCTestCase {
             let second = store.addProvider(.openCodeGo)!
             store.selectedProviderInstanceID = second.id
 
-            store.removeProvider(first.id)
-            XCTAssertEqual(store.registeredProviders.map(\.id), [second.id])
-            XCTAssertEqual(store.selectedProviderInstanceID, second.id)
-
             store.removeProvider(second.id)
+            XCTAssertEqual(store.registeredProviders.map(\.id), [first.id])
+            XCTAssertNil(store.instance(first.id)?.accountLabel)
+            XCTAssertEqual(store.selectedProviderInstanceID, first.id)
+
+            store.removeProvider(first.id)
             XCTAssertTrue(store.registeredProviders.isEmpty)
             XCTAssertNil(store.selectedProviderInstanceID)
         }
