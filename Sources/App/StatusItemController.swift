@@ -135,6 +135,11 @@ final class StatusItemController: NSObject {
 
     private func render() {
         guard let button = statusItem.button else { return }
+        defer {
+            if popover.isShown {
+                popover.positioningRect = Self.popoverAnchorRect(buttonBounds: button.bounds)
+            }
+        }
         guard let instance = settings.selectedProvider else {
             let image = renderEmptyImage()
             statusItem.length = image.size.width + 8
