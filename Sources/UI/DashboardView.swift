@@ -204,7 +204,7 @@ struct DashboardView: View {
 
     private var addProviderMenu: some View {
         Menu {
-            ForEach(ProviderID.implemented) { provider in
+            ForEach(settings.addableProviders) { provider in
                 Button(provider.isExperimental
                        ? "\(provider.displayName) — Experimental"
                        : provider.displayName) {
@@ -227,7 +227,7 @@ struct DashboardView: View {
                 .foregroundStyle(.secondary)
             Text("No provider accounts added")
                 .font(.headline)
-            Text("Use the + button above to add an account.\nYou can add the same provider any number of times.")
+            Text("Use the + button above to add an account.\nProviders with isolated credentials can be added more than once.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
