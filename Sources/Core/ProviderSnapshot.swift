@@ -13,9 +13,6 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// Integrations implemented by AIUsage and eligible for the Add Provider UI.
-    /// SettingsStore may further constrain this catalog for providers that do not
-    /// yet have a safe multi-account isolation mechanism (currently Antigravity).
     static let implemented: [ProviderID] = [
         .openCodeGo,
         .codex,
@@ -56,35 +53,22 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// Only Codex and OpenCode Go have been validated against real maintainer
-    /// accounts. Other integrations remain explicitly Experimental until their
-    /// fixture contracts are confirmed against real provider dashboards.
     var isExperimental: Bool {
-        switch self {
-        case .openCodeGo, .codex:
-            false
-        case .qwen, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
-            true
-        }
+        self != .openCodeGo && self != .codex
     }
 
-    /// Providers whose primary sign-in/sign-out lifecycle is owned by AIUsage.
-    /// Other integrations may still accept an AIUsage-owned per-card credential,
-    /// but their ambient/default login remains owned by the external client.
+    var supportsMultipleAccounts: Bool {
+        self != .antigravity
+    }
+
     var managesAuthentication: Bool {
         switch self {
-        case .openCodeGo, .qwen, .zai:
-            true
-        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
-            false
+        case .openCodeGo, .qwen, .zai: true
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi: false
         }
     }
 }
 
-/// One dashboard/account slot. ProviderID identifies the integration type;
-/// ProviderInstance.id identifies one independently managed account/card.
-/// Multiple instances of the same provider are intentionally valid where the
-/// integration has an isolation mechanism.
 struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
     let id: UUID
     let provider: ProviderID
@@ -97,13 +81,11 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
     }
 
     var title: String {
-        guard let accountLabel else { return provider.displayName }
-        return "\(provider.displayName) · \(accountLabel)"
+        accountLabel.map { "\(provider.displayName) · \($0)" } ?? provider.displayName
     }
 
-    /// Historical name retained because these IDs originated as migration IDs.
-    /// In the current model this means the stable default slot: the one account
-    /// allowed to reuse an ambient external-client login/profile.
+    /// Stable default slot used by fresh installs and legacy migration. Only this
+    /// slot may reuse ambient credentials owned by an external client.
     var isLegacyMigratedInstance: Bool {
         id == Self.legacyID(for: provider)
     }
@@ -112,10 +94,6 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         ProviderInstance(id: id, provider: provider, accountLabel: value)
     }
 
-    /// Stable default-slot IDs. The values deliberately match the migration IDs
-    /// from the old one-card-per-provider representation, which preserves existing
-    /// WebKit/default-client state while also giving fresh installs one recoverable
-    /// ambient-auth slot per provider. Additional accounts always use random UUIDs.
     static func legacyID(for provider: ProviderID) -> UUID {
         let suffix: String = switch provider {
         case .openCodeGo: "000000000001"
@@ -129,14 +107,13 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         case .kimi: "000000000009"
         }
         guard let id = UUID(uuidString: "A1A6E000-0000-4000-8000-\(suffix)") else {
-            preconditionFailure("Internal legacy provider UUID is invalid")
+            preconditionFailure("Internal provider UUID is invalid")
         }
         return id
     }
 
     private static func cleanedLabel(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : String(trimmed.prefix(80))
     }
 }
@@ -151,10 +128,7 @@ struct ProviderSnapshot: Equatable, Sendable {
         self.provider = provider
         self.planName = planName
         self.windows = windows.sorted {
-            if $0.kind.sortOrder != $1.kind.sortOrder {
-                return $0.kind.sortOrder < $1.kind.sortOrder
-            }
-            return $0.id < $1.id
+            ($0.kind.sortOrder, $0.id) < ($1.kind.sortOrder, $1.id)
         }
         self.fetchedAt = fetchedAt
     }
