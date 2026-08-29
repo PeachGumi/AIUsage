@@ -240,6 +240,35 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.refreshing.contains(instance.id))
     }
 
+    func testReaddedDefaultSlotCannotBeRestoredByOlderInflightRefresh() async {
+        let instance = ProviderInstance(
+            id: ProviderInstance.legacyID(for: .codex),
+            provider: .codex)
+        let staleRuntime = GatedProvider(id: .codex)
+        let freshRuntime = CountingProvider(id: .codex, used: 90)
+        var buildCount = 0
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in
+            buildCount += 1
+            if buildCount == 1 { return staleRuntime }
+            return freshRuntime
+        }
+
+        let staleRefresh = Task { @MainActor in await coordinator.refresh(instance.id) }
+        await yieldUntil { staleRuntime.hasEntered }
+
+        coordinator.setEnabledProviders([])
+        coordinator.setEnabledProviders([instance])
+        await coordinator.refresh(instance.id)
+
+        staleRuntime.releaseGate()
+        await staleRefresh.value
+
+        XCTAssertEqual(buildCount, 2)
+        XCTAssertEqual(freshRuntime.fetchCount, 1)
+        XCTAssertEqual(coordinator.snapshots[instance.id]?.windows.first?.usedPercent, 90)
+        XCTAssertEqual(coordinator.authenticationStates[instance.id], .authenticated)
+    }
+
     private func snapshot(provider: ProviderID, used: Double) throws -> ProviderSnapshot {
         ProviderSnapshot(
             provider: provider,
