@@ -7,9 +7,9 @@ final class CodexProvider: UsageProvider {
     private let authLoader: () throws -> CodexCredentials
 
     init(
-        session: URLSession = CodexProvider.makeSession(),
-        authLoader: @escaping () throws -> CodexCredentials = { try CodexAuth.load() })
-    {
+        session: URLSession = MajorProviderHTTP.session(),
+        authLoader: @escaping () throws -> CodexCredentials = { try CodexAuth.load() }
+    ) {
         self.session = session
         self.authLoader = authLoader
     }
@@ -35,19 +35,6 @@ final class CodexProvider: UsageProvider {
         }
         return request
     }
-
-    static func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.urlCredentialStorage = nil
-        return URLSession(
-            configuration: configuration,
-            delegate: RejectRedirectDelegate(),
-            delegateQueue: nil)
-    }
 }
 
 final class RejectRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
@@ -56,8 +43,8 @@ final class RejectRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked
         task: URLSessionTask,
         willPerformHTTPRedirection response: HTTPURLResponse,
         newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void)
-    {
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
         completionHandler(nil)
     }
 }
