@@ -63,8 +63,18 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 
     var isExperimental: Bool {
-        self != .openCodeGo && self != .codex
+        !Self.validatedProviders.contains(self)
     }
+
+    /// Providers whose displayed values have been checked against the real
+    /// account / official dashboard by the maintainer. Keep this explicit and
+    /// document any change in the README provider table.
+    static let validatedProviders: Set<ProviderID> = [
+        .openCodeGo,
+        .codex,
+        .copilot,
+        .antigravity,
+    ]
 
     var supportsMultipleAccounts: Bool {
         self != .antigravity

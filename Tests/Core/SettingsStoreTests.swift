@@ -325,11 +325,11 @@ final class SettingsStoreTests: XCTestCase {
             Set([.openCodeGo, .codex, .qwen, .claude, .antigravity, .copilot, .cursor, .zai, .kimi]))
     }
 
-    func testOnlyCodexAndOpenCodeGoAreRealAccountValidated() {
-        XCTAssertEqual(Set(ProviderID.implemented.filter { !$0.isExperimental }), Set([.openCodeGo, .codex]))
+    func testOnlyValidatedProvidersAreNonExperimental() {
+        XCTAssertEqual(Set(ProviderID.implemented.filter { !$0.isExperimental }), ProviderID.validatedProviders)
         XCTAssertEqual(
             Set(ProviderID.implemented.filter(\.isExperimental)),
-            Set([.qwen, .claude, .antigravity, .copilot, .cursor, .zai, .kimi]))
+            Set([.qwen, .claude, .cursor, .zai, .kimi]))
     }
 
     private func withDefaults(_ body: (UserDefaults) -> Void) {
