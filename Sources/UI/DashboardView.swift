@@ -31,7 +31,7 @@ struct AppActions {
     let renameProvider: (UUID) -> Void
     let refreshAll: () -> Void
     let refresh: (UUID) -> Void
-    let login: (UUID) -> Void
+    let configureAccount: (UUID) -> Void
     let logout: (UUID) -> Void
     let openDashboard: (UUID) -> Void
     let showSettings: () -> Void
@@ -410,21 +410,21 @@ private struct ProviderCard: View {
     }
 
     @ViewBuilder
-    private var authenticationAction: some View {
+    private var accountActionButton: some View {
         switch provider.accountAction {
         case .apiKey:
-            Button("API key…") { actions.login(instance.id) }.buttonStyle(.link)
+            Button("API key…") { actions.configureAccount(instance.id) }.buttonStyle(.link)
         case .account:
-            Button("Account…") { actions.login(instance.id) }.buttonStyle(.link)
+            Button("Account…") { actions.configureAccount(instance.id) }.buttonStyle(.link)
         case .signInOut:
             switch authenticationState {
             case .authenticated:
                 Button("Sign out") { actions.logout(instance.id) }.buttonStyle(.link)
             case .required:
-                Button("Sign in") { actions.login(instance.id) }.buttonStyle(.link)
+                Button("Sign in") { actions.configureAccount(instance.id) }.buttonStyle(.link)
             case .unknown:
                 Button(snapshot != nil ? "Sign out" : "Sign in") {
-                    snapshot != nil ? actions.logout(instance.id) : actions.login(instance.id)
+                    snapshot != nil ? actions.logout(instance.id) : actions.configureAccount(instance.id)
                 }.buttonStyle(.link)
             }
         }
@@ -433,7 +433,7 @@ private struct ProviderCard: View {
     private var cardActions: some View {
         HStack(spacing: 12) {
             Button("Refresh") { actions.refresh(instance.id) }.buttonStyle(.link)
-            authenticationAction
+            accountActionButton
             Button("Rename…") { actions.renameProvider(instance.id) }.buttonStyle(.link)
             Spacer()
             Button("Open dashboard") { actions.openDashboard(instance.id) }.buttonStyle(.link)

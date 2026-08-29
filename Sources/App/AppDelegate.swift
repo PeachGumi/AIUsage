@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             renameProvider: { [weak self] id in self?.renameProvider(id) },
             refreshAll: { [weak self] in Task { await self?.coordinator.refreshAll() } },
             refresh: { [weak self] id in Task { await self?.coordinator.refresh(id) } },
-            login: { [weak self] id in self?.configureOrLogin(id) },
+            configureAccount: { [weak self] id in self?.configureAccount(id) },
             logout: { [weak self] id in Task { await self?.logout(id) } },
             openDashboard: { [weak self] id in self?.openDashboard(id) },
             showSettings: { [weak self] in self?.settingsController.show() },
@@ -249,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Account configuration
 
-    private func configureOrLogin(_ instanceID: UUID) {
+    private func configureAccount(_ instanceID: UUID) {
         guard let instance = settings.instance(instanceID) else { return }
         let isDefault = instance.isDefaultSlot
 
