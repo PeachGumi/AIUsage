@@ -3,124 +3,232 @@ import XCTest
 
 @MainActor
 final class SettingsStoreTests: XCTestCase {
-    func testFreshInstallStartsWithNoRegisteredProviders() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let store = SettingsStore(defaults: defaults)
-
-        XCTAssertTrue(store.registeredProviders.isEmpty)
-        XCTAssertNil(store.selectedProvider)
-        XCTAssertEqual(store.metric, .remaining)
-        XCTAssertEqual(Set(store.addableProviders), Set(ProviderID.implemented))
+    func testFreshInstallStartsWithNoRegisteredAccounts() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            XCTAssertTrue(store.registeredProviders.isEmpty)
+            XCTAssertNil(store.selectedProviderInstanceID)
+            XCTAssertEqual(store.metric, .remaining)
+            XCTAssertEqual(Set(store.addableProviders), Set(ProviderID.implemented))
+        }
     }
 
-    func testAddingProvidersSelectsFirstAndPersistsRegistrationOrder() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+    func testSameProviderCanBeAddedUnlimitedTimesWithUniqueIdentity() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.codex)!
+            let second = store.addProvider(.codex)!
+            let third = store.addProvider(.codex)!
 
-        let first = SettingsStore(defaults: defaults)
-        first.addProvider(.qwen)
-        first.addProvider(.codex)
-        first.metric = .used
-
-        XCTAssertEqual(first.registeredProviders, [.qwen, .codex])
-        XCTAssertEqual(first.selectedProvider, .qwen)
-        XCTAssertFalse(first.addableProviders.contains(.qwen))
-
-        first.moveProvider(from: IndexSet(integer: 1), to: 0)
-        XCTAssertEqual(first.registeredProviders, [.codex, .qwen])
-
-        let restored = SettingsStore(defaults: defaults)
-        XCTAssertEqual(restored.registeredProviders, [.codex, .qwen])
-        XCTAssertEqual(restored.selectedProvider, .qwen)
-        XCTAssertEqual(restored.metric, .used)
+            XCTAssertEqual(store.registeredProviders.map(\.provider), [.codex, .codex, .codex])
+            XCTAssertEqual(Set(store.registeredProviders.map(\.id)).count, 3)
+            XCTAssertEqual(first.id, ProviderInstance.legacyID(for: .codex))
+            XCTAssertNotEqual(second.id, first.id)
+            XCTAssertNotEqual(third.id, first.id)
+            XCTAssertEqual(store.instance(first.id)?.accountLabel, "Account 1")
+            XCTAssertEqual(store.instance(second.id)?.accountLabel, "Account 2")
+            XCTAssertEqual(store.instance(third.id)?.accountLabel, "Account 3")
+            XCTAssertTrue(store.addableProviders.contains(.codex))
+        }
     }
 
-    func testLegacyProviderOrderMigratesOnlyWhenNewRegistrationKeyIsMissing() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(["qwen", "codex", "openCodeGo"], forKey: "providerOrder")
-        defaults.set("codex", forKey: "menuBarProvider")
-
-        let store = SettingsStore(defaults: defaults)
-
-        XCTAssertEqual(store.registeredProviders, [.qwen, .codex, .openCodeGo])
-        XCTAssertEqual(store.selectedProvider, .codex)
-        XCTAssertEqual(defaults.stringArray(forKey: "registeredProviders"), ["qwen", "codex", "openCodeGo"])
+    func testFirstFreshAccountUsesStableDefaultSlot() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            for provider in ProviderID.implemented where provider != .antigravity {
+                let instance = store.addProvider(provider)!
+                XCTAssertEqual(instance.id, ProviderInstance.legacyID(for: provider))
+            }
+        }
     }
 
-    func testLegacySelectedProviderMigratesWhenNoLegacyOrderExists() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set("qwen", forKey: "menuBarProvider")
+    func testReAddingProviderRestoresStableDefaultSlotWhileSiblingRemains() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let defaultAccount = store.addProvider(.codex)!
+            let explicitAccount = store.addProvider(.codex)!
 
-        let store = SettingsStore(defaults: defaults)
+            store.removeProvider(defaultAccount.id)
+            XCTAssertEqual(store.instances(of: .codex).map(\.id), [explicitAccount.id])
 
-        XCTAssertEqual(store.registeredProviders, [.qwen])
-        XCTAssertEqual(store.selectedProvider, .qwen)
+            let restored = store.addProvider(.codex)!
+            XCTAssertEqual(restored.id, ProviderInstance.legacyID(for: .codex))
+            XCTAssertNotEqual(restored.id, explicitAccount.id)
+            XCTAssertEqual(store.instance(restored.id)?.accountLabel, "Account 1")
+            XCTAssertEqual(store.instance(explicitAccount.id)?.accountLabel, "Account 2")
+        }
     }
 
-    func testExplicitEmptyRegistrationDoesNotResurrectLegacyProviders() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set([], forKey: "registeredProviders")
-        defaults.set(["qwen", "codex", "openCodeGo"], forKey: "providerOrder")
-        defaults.set("codex", forKey: "menuBarProvider")
+    func testAntigravityIsLimitedToOneOfficialLocalSession() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.antigravity)
 
-        let store = SettingsStore(defaults: defaults)
-
-        XCTAssertTrue(store.registeredProviders.isEmpty)
-        XCTAssertNil(store.selectedProvider)
+            XCTAssertEqual(first?.id, ProviderInstance.legacyID(for: .antigravity))
+            XCTAssertFalse(store.addableProviders.contains(.antigravity))
+            XCTAssertNil(store.addProvider(.antigravity))
+            XCTAssertEqual(store.instances(of: .antigravity).count, 1)
+        }
     }
 
-    func testDroppingEarlierProviderOnLaterCardPlacesItAtThatCardPosition() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = SettingsStore(defaults: defaults)
-        store.addProvider(.openCodeGo)
-        store.addProvider(.qwen)
-        store.addProvider(.codex)
+    func testPersistedNonDefaultAntigravityInstanceIsSanitizedOut() throws {
+        try withDefaultsThrowing { defaults in
+            let instances = [
+                ProviderInstance(id: ProviderInstance.legacyID(for: .antigravity), provider: .antigravity),
+                ProviderInstance(provider: .antigravity, accountLabel: "Old OAuth experiment"),
+            ]
+            defaults.set(try JSONEncoder().encode(instances), forKey: "providerInstances.v1")
 
-        store.moveProvider(fromIndex: 0, ontoIndex: 2)
-
-        XCTAssertEqual(store.registeredProviders, [.qwen, .codex, .openCodeGo])
+            let store = SettingsStore(defaults: defaults)
+            XCTAssertEqual(store.instances(of: .antigravity).count, 1)
+            XCTAssertEqual(store.instances(of: .antigravity).first?.id, ProviderInstance.legacyID(for: .antigravity))
+        }
     }
 
-    func testDroppingLaterProviderOnEarlierCardPlacesItAtThatCardPosition() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = SettingsStore(defaults: defaults)
-        store.addProvider(.openCodeGo)
-        store.addProvider(.qwen)
-        store.addProvider(.codex)
+    func testAddingDuplicateAfterRemovalReusesFreeAutomaticLabelWithoutCollision() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.codex)!
+            let second = store.addProvider(.codex)!
+            _ = store.addProvider(.codex)!
 
-        store.moveProvider(fromIndex: 2, ontoIndex: 0)
+            store.removeProvider(first.id)
+            let replacement = store.addProvider(.codex)!
 
-        XCTAssertEqual(store.registeredProviders, [.codex, .openCodeGo, .qwen])
+            XCTAssertEqual(store.instance(second.id)?.accountLabel, "Account 2")
+            XCTAssertEqual(store.instance(replacement.id)?.accountLabel, "Account 1")
+            let labels = store.instances(of: .codex).compactMap(\.accountLabel)
+            XCTAssertEqual(Set(labels).count, labels.count)
+        }
     }
 
-    func testSuccessiveDragHoverMovesFollowProviderIdentity() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = SettingsStore(defaults: defaults)
-        store.addProvider(.openCodeGo)
-        store.addProvider(.qwen)
-        store.addProvider(.codex)
+    func testAutomaticLabelAllocationRespectsUserEnteredAccountNumber() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.cursor)!
+            store.renameProvider(first.id, accountLabel: "Account 2")
 
-        store.moveProvider(.openCodeGo, onto: .qwen)
-        XCTAssertEqual(store.registeredProviders, [.qwen, .openCodeGo, .codex])
+            let second = store.addProvider(.cursor)!
+            XCTAssertEqual(store.instance(first.id)?.accountLabel, "Account 2")
+            XCTAssertEqual(store.instance(second.id)?.accountLabel, "Account 1")
+        }
+    }
 
-        store.moveProvider(.openCodeGo, onto: .codex)
-        XCTAssertEqual(store.registeredProviders, [.qwen, .codex, .openCodeGo])
+    func testDuplicateAccountsPersistWithSelectionOrderAndLabels() {
+        withDefaults { defaults in
+            let firstStore = SettingsStore(defaults: defaults)
+            let first = firstStore.addProvider(.qwen)!
+            let second = firstStore.addProvider(.qwen)!
+            firstStore.renameProvider(second.id, accountLabel: "Work")
+            firstStore.selectedProviderInstanceID = second.id
+            firstStore.metric = .used
+            firstStore.moveProvider(second.id, onto: first.id)
+
+            let restored = SettingsStore(defaults: defaults)
+            XCTAssertEqual(restored.registeredProviders.map(\.id), [second.id, first.id])
+            XCTAssertEqual(restored.registeredProviders.map(\.provider), [.qwen, .qwen])
+            XCTAssertEqual(restored.instance(second.id)?.accountLabel, "Work")
+            XCTAssertEqual(restored.selectedProviderInstanceID, second.id)
+            XCTAssertEqual(restored.metric, .used)
+        }
+    }
+
+    func testRemovingOneDuplicateLeavesSiblingAccountAndSelection() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let first = store.addProvider(.openCodeGo)!
+            let second = store.addProvider(.openCodeGo)!
+            store.selectedProviderInstanceID = second.id
+
+            store.removeProvider(first.id)
+            XCTAssertEqual(store.registeredProviders.map(\.id), [second.id])
+            XCTAssertEqual(store.selectedProviderInstanceID, second.id)
+
+            store.removeProvider(second.id)
+            XCTAssertTrue(store.registeredProviders.isEmpty)
+            XCTAssertNil(store.selectedProviderInstanceID)
+        }
+    }
+
+    func testDragIdentityWorksAcrossDuplicateProviderTypes() {
+        withDefaults { defaults in
+            let store = SettingsStore(defaults: defaults)
+            let a = store.addProvider(.codex)!
+            let b = store.addProvider(.codex)!
+            let c = store.addProvider(.qwen)!
+
+            store.moveProvider(a.id, onto: b.id)
+            XCTAssertEqual(store.registeredProviders.map(\.id), [b.id, a.id, c.id])
+
+            store.moveProvider(a.id, onto: c.id)
+            XCTAssertEqual(store.registeredProviders.map(\.id), [b.id, c.id, a.id])
+        }
+    }
+
+    func testLegacyRegisteredProvidersMigrateToStableInstances() {
+        withDefaults { defaults in
+            defaults.set(["qwen", "codex", "qwen", "bogus"], forKey: "registeredProviders")
+            defaults.set("codex", forKey: "menuBarProvider")
+
+            let store = SettingsStore(defaults: defaults)
+
+            XCTAssertEqual(store.registeredProviders.map(\.provider), [.qwen, .codex])
+            XCTAssertEqual(store.registeredProviders[0].id, ProviderInstance.legacyID(for: .qwen))
+            XCTAssertEqual(store.registeredProviders[1].id, ProviderInstance.legacyID(for: .codex))
+            XCTAssertEqual(store.selectedProviderInstanceID, ProviderInstance.legacyID(for: .codex))
+            XCTAssertNotNil(defaults.data(forKey: "providerInstances.v1"))
+        }
+    }
+
+    func testLegacyProviderOrderAndSelectedProviderMigrateWhenRegistrationKeyMissing() {
+        withDefaults { defaults in
+            defaults.set(["qwen", "codex", "openCodeGo"], forKey: "providerOrder")
+            defaults.set("openCodeGo", forKey: "menuBarProvider")
+
+            let store = SettingsStore(defaults: defaults)
+
+            XCTAssertEqual(store.registeredProviders.map(\.provider), [.qwen, .codex, .openCodeGo])
+            XCTAssertEqual(store.selectedProviderInstanceID, ProviderInstance.legacyID(for: .openCodeGo))
+        }
+    }
+
+    func testExplicitNewFormatEmptyDoesNotResurrectLegacyProviders() throws {
+        try withDefaultsThrowing { defaults in
+            defaults.set(try JSONEncoder().encode([ProviderInstance]()), forKey: "providerInstances.v1")
+            defaults.set(["qwen", "codex"], forKey: "registeredProviders")
+            defaults.set("codex", forKey: "menuBarProvider")
+
+            let store = SettingsStore(defaults: defaults)
+            XCTAssertTrue(store.registeredProviders.isEmpty)
+            XCTAssertNil(store.selectedProviderInstanceID)
+        }
+    }
+
+    func testCorruptNewFormatDoesNotResurrectLegacyProviders() {
+        withDefaults { defaults in
+            defaults.set(Data("not-json".utf8), forKey: "providerInstances.v1")
+            defaults.set(["qwen", "codex"], forKey: "registeredProviders")
+
+            let store = SettingsStore(defaults: defaults)
+            XCTAssertTrue(store.registeredProviders.isEmpty)
+        }
+    }
+
+    func testDuplicateUUIDIsSanitizedButDuplicateProviderIDIsPreserved() throws {
+        try withDefaultsThrowing { defaults in
+            let id = UUID()
+            let instances = [
+                ProviderInstance(id: id, provider: .qwen, accountLabel: "First"),
+                ProviderInstance(id: id, provider: .qwen, accountLabel: "Duplicate identity"),
+                ProviderInstance(provider: .qwen, accountLabel: "Different account")
+            ]
+            defaults.set(try JSONEncoder().encode(instances), forKey: "providerInstances.v1")
+
+            let store = SettingsStore(defaults: defaults)
+            XCTAssertEqual(store.registeredProviders.count, 2)
+            XCTAssertEqual(store.registeredProviders.map(\.provider), [.qwen, .qwen])
+            XCTAssertEqual(Set(store.registeredProviders.map(\.id)).count, 2)
+        }
     }
 
     func testDragLayoutUsesHysteresisAroundAdjacentSlotCenters() {
@@ -130,56 +238,16 @@ final class SettingsStoreTests: XCTestCase {
             CGRect(x: 0, y: 224, width: 400, height: 100)
         ]
 
-        XCTAssertEqual(
-            ProviderDragLayout.nextIndex(draggedCenterY: 111, currentIndex: 0, slots: slots, hysteresis: 6),
-            0)
-        XCTAssertEqual(
-            ProviderDragLayout.nextIndex(draggedCenterY: 113, currentIndex: 0, slots: slots, hysteresis: 6),
-            1)
-        XCTAssertEqual(
-            ProviderDragLayout.nextIndex(draggedCenterY: 101, currentIndex: 1, slots: slots, hysteresis: 6),
-            1)
-        XCTAssertEqual(
-            ProviderDragLayout.nextIndex(draggedCenterY: 99, currentIndex: 1, slots: slots, hysteresis: 6),
-            0)
+        XCTAssertEqual(ProviderDragLayout.nextIndex(draggedCenterY: 111, currentIndex: 0, slots: slots, hysteresis: 6), 0)
+        XCTAssertEqual(ProviderDragLayout.nextIndex(draggedCenterY: 113, currentIndex: 0, slots: slots, hysteresis: 6), 1)
+        XCTAssertEqual(ProviderDragLayout.nextIndex(draggedCenterY: 101, currentIndex: 1, slots: slots, hysteresis: 6), 1)
+        XCTAssertEqual(ProviderDragLayout.nextIndex(draggedCenterY: 99, currentIndex: 1, slots: slots, hysteresis: 6), 0)
     }
 
     func testDragLayoutLocksCardTranslationToVerticalAxis() {
         XCTAssertEqual(
             ProviderDragLayout.verticalTranslation(CGSize(width: 91, height: -37)),
             CGSize(width: 0, height: -37))
-    }
-
-    func testRemovingSelectedProviderFallsBackThenBecomesEmpty() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        let store = SettingsStore(defaults: defaults)
-        store.addProvider(.openCodeGo)
-        store.addProvider(.codex)
-        store.selectedProvider = .codex
-
-        store.removeProvider(.codex)
-        XCTAssertEqual(store.registeredProviders, [.openCodeGo])
-        XCTAssertEqual(store.selectedProvider, .openCodeGo)
-
-        store.removeProvider(.openCodeGo)
-        XCTAssertTrue(store.registeredProviders.isEmpty)
-        XCTAssertNil(store.selectedProvider)
-    }
-
-    func testRegistrationSanitizesInvalidAndDuplicateEntries() {
-        let suite = "AIUsageTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(["qwen", "bogus", "qwen"], forKey: "registeredProviders")
-        defaults.set("codex", forKey: "menuBarProvider")
-
-        let store = SettingsStore(defaults: defaults)
-
-        XCTAssertEqual(store.registeredProviders, [.qwen])
-        XCTAssertEqual(store.selectedProvider, .qwen)
     }
 
     func testRequiredProvidersAreImplemented() {
@@ -189,11 +257,23 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     func testOnlyCodexAndOpenCodeGoAreRealAccountValidated() {
-        XCTAssertEqual(
-            Set(ProviderID.implemented.filter { !$0.isExperimental }),
-            Set([.openCodeGo, .codex]))
+        XCTAssertEqual(Set(ProviderID.implemented.filter { !$0.isExperimental }), Set([.openCodeGo, .codex]))
         XCTAssertEqual(
             Set(ProviderID.implemented.filter(\.isExperimental)),
             Set([.qwen, .claude, .antigravity, .copilot, .cursor, .zai, .kimi]))
+    }
+
+    private func withDefaults(_ body: (UserDefaults) -> Void) {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        body(defaults)
+    }
+
+    private func withDefaultsThrowing(_ body: (UserDefaults) throws -> Void) throws {
+        let suite = "AIUsageTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try body(defaults)
     }
 }

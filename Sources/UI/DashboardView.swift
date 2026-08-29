@@ -10,15 +10,11 @@ enum ProviderDragLayout {
         guard slots.indices.contains(currentIndex) else { return currentIndex }
         if currentIndex + 1 < slots.count {
             let lowerBoundary = (slots[currentIndex].midY + slots[currentIndex + 1].midY) / 2
-            if draggedCenterY > lowerBoundary + hysteresis {
-                return currentIndex + 1
-            }
+            if draggedCenterY > lowerBoundary + hysteresis { return currentIndex + 1 }
         }
         if currentIndex > 0 {
             let upperBoundary = (slots[currentIndex - 1].midY + slots[currentIndex].midY) / 2
-            if draggedCenterY < upperBoundary - hysteresis {
-                return currentIndex - 1
-            }
+            if draggedCenterY < upperBoundary - hysteresis { return currentIndex - 1 }
         }
         return currentIndex
     }
@@ -31,30 +27,34 @@ enum ProviderDragLayout {
 @MainActor
 struct AppActions {
     let addProvider: (ProviderID) -> Void
-    let removeProvider: (ProviderID) -> Void
+    let removeProvider: (UUID) -> Void
+    let renameProvider: (UUID) -> Void
     let refreshAll: () -> Void
-    let refresh: (ProviderID) -> Void
-    let login: (ProviderID) -> Void
-    let logout: (ProviderID) -> Void
-    let openDashboard: (ProviderID) -> Void
+    let refresh: (UUID) -> Void
+    let configureAccount: (UUID) -> Void
+    let logout: (UUID) -> Void
+    let openDashboard: (UUID) -> Void
     let showSettings: () -> Void
     let quit: () -> Void
 }
 
-/// Main popover content. Supported providers are a catalog; only providers the
-/// user explicitly adds are shown, refreshed, and eligible for menu-bar pinning.
+private struct ProviderDragState {
+    let instanceID: UUID
+    let startFrame: CGRect
+    let slots: [CGRect]
+    var currentIndex: Int
+    var translation: CGSize = .zero
+    var dropTarget: UUID?
+}
+
 struct DashboardView: View {
     @ObservedObject var coordinator: UsageCoordinator
     @ObservedObject var settings: SettingsStore
     @ObservedObject var layoutMetrics: PopoverLayoutMetrics
     let actions: AppActions
-    @State private var draggedProvider: ProviderID?
-    @State private var hoveredProvider: ProviderID?
-    @State private var dragTranslation: CGSize = .zero
-    @State private var dragStartFrame: CGRect?
-    @State private var dragSlotFrames: [CGRect] = []
-    @State private var dragCurrentIndex: Int?
-    @State private var cardFrames: [ProviderID: CGRect] = [:]
+
+    @State private var dragState: ProviderDragState?
+    @State private var cardFrames: [UUID: CGRect] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,10 +63,6 @@ struct DashboardView: View {
             if settings.registeredProviders.isEmpty {
                 emptyState
             } else {
-                // StatusItemController grows the popover to the natural card
-                // stack until the current display becomes the limiting factor.
-                // At that point this ScrollView, rather than clipping/compressing
-                // cards, provides the required overflow behavior.
                 ScrollView(.vertical) {
                     providerList
                         .background(
@@ -91,25 +87,26 @@ struct DashboardView: View {
     private var providerList: some View {
         ZStack(alignment: .topLeading) {
             VStack(spacing: 12) {
-                ForEach(settings.registeredProviders, id: \.self) { provider in
-                    providerCard(provider, floating: false)
-                        .opacity(draggedProvider == provider ? 0.12 : 1)
+                ForEach(settings.registeredProviders) { instance in
+                    providerCard(instance, floating: false)
+                        .opacity(dragState?.instanceID == instance.id ? 0.12 : 1)
                         .background(
                             GeometryReader { proxy in
                                 Color.clear.preference(
                                     key: ProviderCardFrameKey.self,
-                                    value: [provider: proxy.frame(in: .named("provider-list"))])
+                                    value: [instance.id: proxy.frame(in: .named("provider-list"))])
                             }
                         )
                 }
             }
 
-            if let provider = draggedProvider, let start = dragStartFrame {
-                providerCard(provider, floating: true)
-                    .frame(width: start.width, height: start.height)
+            if let dragState,
+               let instance = settings.instance(dragState.instanceID) {
+                providerCard(instance, floating: true)
+                    .frame(width: dragState.startFrame.width, height: dragState.startFrame.height)
                     .position(
-                        x: start.midX,
-                        y: start.midY + dragTranslation.height)
+                        x: dragState.startFrame.midX,
+                        y: dragState.startFrame.midY + dragState.translation.height)
                     .scaleEffect(1.025)
                     .shadow(color: .black.opacity(0.30), radius: 14, y: 8)
                     .zIndex(100)
@@ -124,67 +121,65 @@ struct DashboardView: View {
         .padding(.vertical, 10)
     }
 
-    private func providerCard(_ provider: ProviderID, floating: Bool) -> some View {
+    private func providerCard(_ instance: ProviderInstance, floating: Bool) -> some View {
         ProviderCard(
-            provider: provider,
-            snapshot: coordinator.snapshots[provider],
-            error: coordinator.errors[provider],
-            refreshing: coordinator.refreshing.contains(provider),
-            authenticationState: coordinator.authenticationStates[provider] ?? .unknown,
+            instance: instance,
+            snapshot: coordinator.snapshots[instance.id],
+            error: coordinator.errors[instance.id],
+            refreshing: coordinator.refreshing.contains(instance.id),
+            authenticationState: coordinator.authenticationStates[instance.id] ?? .unknown,
             metric: settings.metric,
-            isSelected: settings.selectedProvider == provider,
+            isSelected: settings.selectedProviderInstanceID == instance.id,
             showsReorderHandle: settings.registeredProviders.count > 1,
-            isDropTarget: hoveredProvider == provider,
+            isDropTarget: dragState?.dropTarget == instance.id,
             isFloating: floating,
             actions: actions,
-            select: { settings.selectedProvider = provider },
-            dragChanged: { value in handleDragChanged(provider: provider, value: value) },
-            dragEnded: { handleDragEnded() })
+            select: { settings.selectedProviderInstanceID = instance.id },
+            dragChanged: { value in handleDragChanged(instanceID: instance.id, value: value) },
+            dragEnded: handleDragEnded)
     }
 
-    private func handleDragChanged(provider: ProviderID, value: DragGesture.Value) {
-        if draggedProvider == nil {
+    private func handleDragChanged(instanceID: UUID, value: DragGesture.Value) {
+        if dragState == nil {
             let order = settings.registeredProviders
-            let slots = order.compactMap { cardFrames[$0] }
+            let slots = order.compactMap { cardFrames[$0.id] }
             guard slots.count == order.count,
-                  let index = order.firstIndex(of: provider),
-                  let startFrame = cardFrames[provider] else { return }
-            draggedProvider = provider
-            dragStartFrame = startFrame
-            dragSlotFrames = slots
-            dragCurrentIndex = index
+                  let index = order.firstIndex(where: { $0.id == instanceID }),
+                  let startFrame = cardFrames[instanceID] else { return }
+            dragState = ProviderDragState(
+                instanceID: instanceID,
+                startFrame: startFrame,
+                slots: slots,
+                currentIndex: index)
         }
-        dragTranslation = ProviderDragLayout.verticalTranslation(value.translation)
 
-        guard let currentIndex = dragCurrentIndex,
-              let startFrame = dragStartFrame else { return }
+        guard var state = dragState else { return }
+        state.translation = ProviderDragLayout.verticalTranslation(value.translation)
         let nextIndex = ProviderDragLayout.nextIndex(
-            draggedCenterY: startFrame.midY + dragTranslation.height,
-            currentIndex: currentIndex,
-            slots: dragSlotFrames,
+            draggedCenterY: state.startFrame.midY + state.translation.height,
+            currentIndex: state.currentIndex,
+            slots: state.slots,
             hysteresis: 6)
-        guard nextIndex != currentIndex,
+
+        guard nextIndex != state.currentIndex,
               settings.registeredProviders.indices.contains(nextIndex) else {
-            hoveredProvider = nil
+            state.dropTarget = nil
+            dragState = state
             return
         }
 
-        let target = settings.registeredProviders[nextIndex]
-        hoveredProvider = target
-        dragCurrentIndex = nextIndex
+        let target = settings.registeredProviders[nextIndex].id
+        state.currentIndex = nextIndex
+        state.dropTarget = target
+        dragState = state
         withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
-            settings.moveProvider(provider, onto: target)
+            settings.moveProvider(instanceID, onto: target)
         }
     }
 
     private func handleDragEnded() {
         withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
-            draggedProvider = nil
-            hoveredProvider = nil
-            dragTranslation = .zero
-            dragStartFrame = nil
-            dragSlotFrames = []
-            dragCurrentIndex = nil
+            dragState = nil
         }
     }
 
@@ -194,35 +189,28 @@ struct DashboardView: View {
                 Text("AI Usage").font(.headline)
                 Text(settings.registeredProviders.isEmpty
                      ? "Add a provider to get started"
-                     : "Click a card to pin it to the menu bar")
+                     : "Each card is an independent account")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             addProviderMenu
-            Button(action: actions.refreshAll) {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .disabled(settings.registeredProviders.isEmpty)
-            .help("Refresh registered providers")
-            .accessibilityLabel("Refresh registered providers")
+            Button(action: actions.refreshAll) { Image(systemName: "arrow.clockwise") }
+                .buttonStyle(.borderless)
+                .disabled(settings.registeredProviders.isEmpty)
+                .help("Refresh registered accounts")
+                .accessibilityLabel("Refresh registered accounts")
         }
         .padding(14)
     }
 
     private var addProviderMenu: some View {
         Menu {
-            if settings.addableProviders.isEmpty {
-                Button("All supported providers are added") {}
-                    .disabled(true)
-            } else {
-                ForEach(settings.addableProviders) { provider in
-                    Button(provider.isExperimental
-                           ? "\(provider.displayName) — Experimental"
-                           : provider.displayName) {
-                        actions.addProvider(provider)
-                    }
+            ForEach(settings.addableProviders) { provider in
+                Button(provider.isExperimental
+                       ? "\(provider.displayName) — Experimental"
+                       : provider.displayName) {
+                    actions.addProvider(provider)
                 }
             }
         } label: {
@@ -230,8 +218,8 @@ struct DashboardView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Add provider")
-        .accessibilityLabel("Add provider")
+        .help("Add another provider account")
+        .accessibilityLabel("Add provider account")
     }
 
     private var emptyState: some View {
@@ -239,9 +227,9 @@ struct DashboardView: View {
             Image(systemName: "plus.circle.dashed")
                 .font(.system(size: 34))
                 .foregroundStyle(.secondary)
-            Text("No providers added")
+            Text("No provider accounts added")
                 .font(.headline)
-            Text("Use the + button above to choose a provider.\nAIUsage will only contact providers you add.")
+            Text("Use the + button above to add an account.\nProviders with isolated credentials can be added more than once.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -259,8 +247,7 @@ struct DashboardView: View {
                 Text("Drag cards to reorder").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
             }
-            Button("Quit", action: actions.quit)
-                .buttonStyle(.borderless)
+            Button("Quit", action: actions.quit).buttonStyle(.borderless)
         }
         .padding(12)
     }
@@ -268,22 +255,20 @@ struct DashboardView: View {
 
 private struct ProviderListHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
-
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
     }
 }
 
 private struct ProviderCardFrameKey: PreferenceKey {
-    static let defaultValue: [ProviderID: CGRect] = [:]
-
-    static func reduce(value: inout [ProviderID: CGRect], nextValue: () -> [ProviderID: CGRect]) {
+    static let defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
     }
 }
 
 private struct ProviderCard: View {
-    let provider: ProviderID
+    let instance: ProviderInstance
     let snapshot: ProviderSnapshot?
     let error: String?
     let refreshing: Bool
@@ -297,6 +282,8 @@ private struct ProviderCard: View {
     let select: () -> Void
     let dragChanged: (DragGesture.Value) -> Void
     let dragEnded: () -> Void
+
+    private var provider: ProviderID { instance.provider }
 
     var body: some View {
         card
@@ -333,24 +320,19 @@ private struct ProviderCard: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .accessibilityHint("Sets this provider as the menu bar display")
+        .accessibilityHint("Sets this account as the menu bar display")
         .accessibilityAction(named: "Pin to menu bar", select)
         .onTapGesture(perform: select)
     }
 
     private var accessibilitySummary: String {
         let status: String
-        if authenticationState == .required {
-            status = "sign in required"
-        } else if error != nil {
-            status = "needs attention"
-        } else if snapshot == nil {
-            status = "loading"
-        } else {
-            status = "available"
-        }
+        if authenticationState == .required { status = "sign in required" }
+        else if error != nil { status = "needs attention" }
+        else if snapshot == nil { status = "loading" }
+        else { status = "available" }
         let experimental = provider.isExperimental ? ", experimental integration" : ""
-        return "\(provider.displayName), \(status)\(experimental)\(isSelected ? ", shown in menu bar" : "")"
+        return "\(instance.title), \(status)\(experimental)\(isSelected ? ", shown in menu bar" : "")"
     }
 
     private var cardHeader: some View {
@@ -361,7 +343,6 @@ private struct ProviderCard: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 18, height: 24)
                     .contentShape(Rectangle())
-
                 if isFloating {
                     handle
                 } else {
@@ -371,7 +352,7 @@ private struct ProviderCard: View {
                                 .onChanged(dragChanged)
                                 .onEnded { _ in dragEnded() })
                         .help("Drag to reorder")
-                        .accessibilityLabel("Drag \(provider.displayName) to reorder")
+                        .accessibilityLabel("Drag \(instance.title) to reorder")
                 }
             }
             Text(provider.shortName)
@@ -382,6 +363,9 @@ private struct ProviderCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(provider.displayName).font(.subheadline.weight(.semibold))
                 HStack(spacing: 6) {
+                    if let label = instance.accountLabel {
+                        Text(label).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+                    }
                     if provider.isExperimental {
                         Label("Experimental", systemImage: "flask")
                             .font(.caption2.weight(.semibold))
@@ -426,35 +410,37 @@ private struct ProviderCard: View {
     }
 
     @ViewBuilder
-    private var authenticationAction: some View {
-        if provider == .zai {
-            Button("API key…") { actions.login(provider) }.buttonStyle(.link)
-        } else if provider.managesAuthentication {
+    private var accountActionButton: some View {
+        switch provider.accountAction {
+        case .apiKey:
+            Button("API key…") { actions.configureAccount(instance.id) }.buttonStyle(.link)
+        case .account:
+            Button("Account…") { actions.configureAccount(instance.id) }.buttonStyle(.link)
+        case .signInOut:
             switch authenticationState {
             case .authenticated:
-                Button("Sign out") { actions.logout(provider) }.buttonStyle(.link)
+                Button("Sign out") { actions.logout(instance.id) }.buttonStyle(.link)
             case .required:
-                Button("Sign in") { actions.login(provider) }.buttonStyle(.link)
+                Button("Sign in") { actions.configureAccount(instance.id) }.buttonStyle(.link)
             case .unknown:
-                if snapshot != nil {
-                    Button("Sign out") { actions.logout(provider) }.buttonStyle(.link)
-                } else {
-                    Button("Sign in") { actions.login(provider) }.buttonStyle(.link)
-                }
+                Button(snapshot != nil ? "Sign out" : "Sign in") {
+                    snapshot != nil ? actions.logout(instance.id) : actions.configureAccount(instance.id)
+                }.buttonStyle(.link)
             }
         }
     }
 
     private var cardActions: some View {
-        HStack(spacing: 14) {
-            Button("Refresh") { actions.refresh(provider) }.buttonStyle(.link)
-            authenticationAction
+        HStack(spacing: 12) {
+            Button("Refresh") { actions.refresh(instance.id) }.buttonStyle(.link)
+            accountActionButton
+            Button("Rename…") { actions.renameProvider(instance.id) }.buttonStyle(.link)
             Spacer()
-            Button("Open dashboard") { actions.openDashboard(provider) }.buttonStyle(.link)
-            Button("Remove") { actions.removeProvider(provider) }
+            Button("Open dashboard") { actions.openDashboard(instance.id) }.buttonStyle(.link)
+            Button("Remove") { actions.removeProvider(instance.id) }
                 .buttonStyle(.link)
                 .foregroundStyle(.red)
-                .help("Remove from AIUsage without signing out")
+                .help("Remove this account and its AIUsage-owned account data")
         }
         .font(.caption)
     }

@@ -3,173 +3,287 @@ import XCTest
 
 @MainActor
 final class UsageCoordinatorTests: XCTestCase {
-    func testRefreshAllKeepsSuccessfulProvidersWhenAnotherFails() async throws {
-        let codex = StubProvider(
+    func testDuplicateProviderInstancesFetchAndStoreIndependentSnapshots() async throws {
+        let personal = ProviderInstance(provider: .codex, accountLabel: "Personal")
+        let work = ProviderInstance(provider: .codex, accountLabel: "Work")
+        let personalRuntime = StubProvider(
             id: .codex,
-            result: .success(ProviderSnapshot(
-                provider: .codex,
-                planName: "Plus",
-                windows: [try UsageWindow(kind: .fiveHour, label: "5-hour", usedPercent: 20, resetsAt: nil, resetDescription: nil)],
-                fetchedAt: Date())))
-        let qwen = StubProvider(id: .qwen, result: .failure(TestError.failed))
-        let coordinator = UsageCoordinator(providers: [codex, qwen])
-
-        await coordinator.refreshAll()
-
-        XCTAssertEqual(coordinator.snapshots[.codex]?.windows.first?.usedPercent, 20)
-        XCTAssertNotNil(coordinator.errors[.qwen])
-        XCTAssertNil(coordinator.errors[.codex])
-        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
-        XCTAssertEqual(coordinator.authenticationStates[.qwen], .unknown)
-    }
-
-    func testFailedRefreshRetainsLastValidSnapshotAndAuthenticatedState() async throws {
-        let initial = ProviderSnapshot(
-            provider: .codex,
-            planName: nil,
-            windows: [try UsageWindow(kind: .weekly, label: "Weekly", usedPercent: 10, resetsAt: nil, resetDescription: nil)],
-            fetchedAt: Date())
-        let provider = SequencedProvider(id: .codex, results: [.success(initial), .failure(TestError.failed)])
-        let coordinator = UsageCoordinator(providers: [provider])
-
-        await coordinator.refreshAll()
-        await coordinator.refreshAll()
-
-        XCTAssertEqual(coordinator.snapshots[.codex], initial)
-        XCTAssertNotNil(coordinator.errors[.codex])
-        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
-    }
-
-    func testAuthenticationFailureIsTrackedSeparatelyFromTransientErrors() async {
-        let provider = StubProvider(id: .qwen, result: .failure(TestAuthenticationError.required))
-        let coordinator = UsageCoordinator(providers: [provider])
-
-        await coordinator.refresh(.qwen)
-
-        XCTAssertEqual(coordinator.authenticationStates[.qwen], .required)
-        XCTAssertNotNil(coordinator.errors[.qwen])
-    }
-
-    func testMarkSignedOutClearsOnlySelectedProvider() async throws {
-        let codex = StubProvider(
+            result: .success(try snapshot(provider: .codex, used: 20)))
+        let workRuntime = StubProvider(
             id: .codex,
-            result: .success(ProviderSnapshot(
-                provider: .codex,
-                planName: nil,
-                windows: [try UsageWindow(kind: .weekly, label: "Weekly", usedPercent: 12, resetsAt: nil, resetDescription: nil)],
-                fetchedAt: Date())))
-        let qwen = StubProvider(
+            result: .success(try snapshot(provider: .codex, used: 70)))
+        let runtimes: [UUID: any UsageProvider] = [
+            personal.id: personalRuntime,
+            work.id: workRuntime
+        ]
+        let coordinator = UsageCoordinator(instances: [personal, work]) { runtimes[$0.id]! }
+
+        await coordinator.refreshAll()
+
+        XCTAssertEqual(coordinator.snapshots[personal.id]?.windows.first?.usedPercent, 20)
+        XCTAssertEqual(coordinator.snapshots[work.id]?.windows.first?.usedPercent, 70)
+        XCTAssertEqual(coordinator.authenticationStates[personal.id], .authenticated)
+        XCTAssertEqual(coordinator.authenticationStates[work.id], .authenticated)
+    }
+
+    func testRefreshingOneDuplicateDoesNotTouchSibling() async throws {
+        let first = ProviderInstance(provider: .qwen)
+        let second = ProviderInstance(provider: .qwen)
+        let firstRuntime = SequencedProvider(
             id: .qwen,
-            result: .success(ProviderSnapshot(
-                provider: .qwen,
-                planName: nil,
-                windows: [try UsageWindow(kind: .weekly, label: "Weekly", usedPercent: 8, resetsAt: nil, resetDescription: nil)],
-                fetchedAt: Date())))
-        let coordinator = UsageCoordinator(providers: [codex, qwen])
+            results: [
+                .success(try snapshot(provider: .qwen, used: 10)),
+                .success(try snapshot(provider: .qwen, used: 30))
+            ])
+        let secondRuntime = CountingProvider(id: .qwen, used: 80)
+        let runtimes: [UUID: any UsageProvider] = [first.id: firstRuntime, second.id: secondRuntime]
+        let coordinator = UsageCoordinator(instances: [first, second]) { runtimes[$0.id]! }
+
         await coordinator.refreshAll()
+        XCTAssertEqual(secondRuntime.fetchCount, 1)
+        await coordinator.refresh(first.id)
 
-        coordinator.markSignedOut(.qwen, message: "Sign in required")
-
-        XCTAssertNil(coordinator.snapshots[.qwen])
-        XCTAssertEqual(coordinator.errors[.qwen], "Sign in required")
-        XCTAssertEqual(coordinator.authenticationStates[.qwen], .required)
-        XCTAssertNotNil(coordinator.snapshots[.codex])
-        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
+        XCTAssertEqual(coordinator.snapshots[first.id]?.windows.first?.usedPercent, 30)
+        XCTAssertEqual(coordinator.snapshots[second.id]?.windows.first?.usedPercent, 80)
+        XCTAssertEqual(secondRuntime.fetchCount, 1)
     }
 
-    func testExplicitlyEmptyRegistrationPerformsNoProviderRequests() async {
-        let codex = CountingProvider(id: .codex)
-        let qwen = CountingProvider(id: .qwen)
-        let coordinator = UsageCoordinator(providers: [codex, qwen], enabledProviders: [])
+    func testRemovingOneDuplicateClearsOnlyThatAccountState() async throws {
+        let first = ProviderInstance(provider: .codex)
+        let second = ProviderInstance(provider: .codex)
+        let runtimes: [UUID: any UsageProvider] = [
+            first.id: CountingProvider(id: .codex, used: 15),
+            second.id: CountingProvider(id: .codex, used: 55)
+        ]
+        let coordinator = UsageCoordinator(instances: [first, second]) { runtimes[$0.id]! }
+        await coordinator.refreshAll()
+
+        coordinator.setEnabledProviders([second])
+
+        XCTAssertNil(coordinator.snapshots[first.id])
+        XCTAssertNil(coordinator.authenticationStates[first.id])
+        XCTAssertNotNil(coordinator.snapshots[second.id])
+        XCTAssertEqual(coordinator.authenticationStates[second.id], .authenticated)
+    }
+
+    func testFailureAndAuthenticationStateAreScopedToOneAccount() async throws {
+        let healthy = ProviderInstance(provider: .qwen)
+        let signedOut = ProviderInstance(provider: .qwen)
+        let runtimes: [UUID: any UsageProvider] = [
+            healthy.id: StubProvider(id: .qwen, result: .success(try snapshot(provider: .qwen, used: 25))),
+            signedOut.id: StubProvider(id: .qwen, result: .failure(TestAuthenticationError.required))
+        ]
+        let coordinator = UsageCoordinator(instances: [healthy, signedOut]) { runtimes[$0.id]! }
 
         await coordinator.refreshAll()
-        await coordinator.refresh(.codex)
 
-        XCTAssertEqual(codex.fetchCount, 0)
-        XCTAssertEqual(qwen.fetchCount, 0)
+        XCTAssertEqual(coordinator.authenticationStates[healthy.id], .authenticated)
+        XCTAssertNil(coordinator.errors[healthy.id])
+        XCTAssertEqual(coordinator.authenticationStates[signedOut.id], .required)
+        XCTAssertNotNil(coordinator.errors[signedOut.id])
+        XCTAssertNil(coordinator.snapshots[signedOut.id])
+    }
+
+    func testFailedRefreshRetainsOnlyThatAccountsLastValidSnapshot() async throws {
+        let instance = ProviderInstance(provider: .codex)
+        let initial = try snapshot(provider: .codex, used: 10)
+        let runtime = SequencedProvider(id: .codex, results: [.success(initial), .failure(TestError.failed)])
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in runtime }
+
+        await coordinator.refresh(instance.id)
+        await coordinator.refresh(instance.id)
+
+        XCTAssertEqual(coordinator.snapshots[instance.id], initial)
+        XCTAssertNotNil(coordinator.errors[instance.id])
+        XCTAssertEqual(coordinator.authenticationStates[instance.id], .authenticated)
+    }
+
+    func testMarkSignedOutClearsOnlySelectedAccount() async throws {
+        let first = ProviderInstance(provider: .qwen)
+        let second = ProviderInstance(provider: .qwen)
+        let runtimes: [UUID: any UsageProvider] = [
+            first.id: CountingProvider(id: .qwen, used: 12),
+            second.id: CountingProvider(id: .qwen, used: 8)
+        ]
+        let coordinator = UsageCoordinator(instances: [first, second]) { runtimes[$0.id]! }
+        await coordinator.refreshAll()
+
+        coordinator.markSignedOut(first.id, message: "Sign in required")
+
+        XCTAssertNil(coordinator.snapshots[first.id])
+        XCTAssertEqual(coordinator.errors[first.id], "Sign in required")
+        XCTAssertEqual(coordinator.authenticationStates[first.id], .required)
+        XCTAssertNotNil(coordinator.snapshots[second.id])
+        XCTAssertEqual(coordinator.authenticationStates[second.id], .authenticated)
+    }
+
+    func testCoordinatorIgnoresDuplicateInstanceIdentityInsteadOfTrapping() async {
+        let id = UUID()
+        let first = ProviderInstance(id: id, provider: .codex, accountLabel: "First")
+        let duplicate = ProviderInstance(id: id, provider: .qwen, accountLabel: "Duplicate")
+        var factoryCalls = 0
+        let coordinator = UsageCoordinator(instances: [first, duplicate]) { instance in
+            factoryCalls += 1
+            return CountingProvider(id: instance.provider, used: 44)
+        }
+
+        await coordinator.refreshAll()
+
+        XCTAssertEqual(factoryCalls, 1)
+        XCTAssertEqual(coordinator.instance(id)?.provider, .codex)
+        XCTAssertEqual(coordinator.snapshots[id]?.provider, .codex)
+    }
+
+    func testExplicitlyEmptyRegistrationCreatesNoProviderRuntime() async {
+        var factoryCalls = 0
+        let coordinator = UsageCoordinator(instances: []) { instance in
+            factoryCalls += 1
+            return CountingProvider(id: instance.provider, used: 1)
+        }
+
+        await coordinator.refreshAll()
+
+        XCTAssertEqual(factoryCalls, 0)
         XCTAssertTrue(coordinator.snapshots.isEmpty)
         XCTAssertTrue(coordinator.authenticationStates.isEmpty)
     }
 
-    func testChangingRegistrationControlsRefreshAndClearsRemovedPresentationState() async {
-        let codex = CountingProvider(id: .codex)
-        let qwen = CountingProvider(id: .qwen)
-        let coordinator = UsageCoordinator(providers: [codex, qwen], enabledProviders: [.codex])
+    func testAddingDuplicateAfterInitializationCreatesSecondRuntime() async {
+        let first = ProviderInstance(provider: .kimi)
+        let second = ProviderInstance(provider: .kimi)
+        var runtimes: [UUID: CountingProvider] = [:]
+        let coordinator = UsageCoordinator(instances: [first]) { instance in
+            let runtime = CountingProvider(id: instance.provider, used: instance.id == first.id ? 10 : 90)
+            runtimes[instance.id] = runtime
+            return runtime
+        }
 
+        coordinator.setEnabledProviders([first, second])
         await coordinator.refreshAll()
-        XCTAssertEqual(codex.fetchCount, 1)
-        XCTAssertEqual(qwen.fetchCount, 0)
-        XCTAssertNotNil(coordinator.snapshots[.codex])
-        XCTAssertEqual(coordinator.authenticationStates[.codex], .authenticated)
 
-        coordinator.setEnabledProviders([.qwen])
-        XCTAssertNil(coordinator.snapshots[.codex])
-        XCTAssertNil(coordinator.authenticationStates[.codex])
-        XCTAssertEqual(coordinator.authenticationStates[.qwen], .unknown)
-
-        await coordinator.refreshAll()
-        XCTAssertEqual(codex.fetchCount, 1)
-        XCTAssertEqual(qwen.fetchCount, 1)
-        XCTAssertNotNil(coordinator.snapshots[.qwen])
-        XCTAssertEqual(coordinator.authenticationStates[.qwen], .authenticated)
+        XCTAssertEqual(runtimes.count, 2)
+        XCTAssertEqual(runtimes[first.id]?.fetchCount, 1)
+        XCTAssertEqual(runtimes[second.id]?.fetchCount, 1)
+        XCTAssertEqual(coordinator.snapshots[first.id]?.windows.first?.usedPercent, 10)
+        XCTAssertEqual(coordinator.snapshots[second.id]?.windows.first?.usedPercent, 90)
     }
 
-    func testRefreshAllStartsProvidersWithoutWaitingForEachOther() async {
-        let first = GatedProvider(id: .codex)
-        let second = GatedProvider(id: .qwen)
-        let coordinator = UsageCoordinator(providers: [first, second])
+    func testRebuildProviderReplacesOnlySelectedAccountRuntime() async {
+        let first = ProviderInstance(provider: .cursor)
+        let second = ProviderInstance(provider: .cursor)
+        var buildCounts: [UUID: Int] = [:]
+        var latest: [UUID: CountingProvider] = [:]
+        let coordinator = UsageCoordinator(instances: [first, second]) { instance in
+            buildCounts[instance.id, default: 0] += 1
+            let runtime = CountingProvider(id: instance.provider, used: Double(buildCounts[instance.id]!) * 10)
+            latest[instance.id] = runtime
+            return runtime
+        }
+
+        await coordinator.refreshAll()
+        coordinator.rebuildProvider(first.id)
+        await coordinator.refresh(first.id)
+
+        XCTAssertEqual(buildCounts[first.id], 2)
+        XCTAssertEqual(buildCounts[second.id], 1)
+        XCTAssertEqual(coordinator.snapshots[first.id]?.windows.first?.usedPercent, 20)
+        XCTAssertEqual(coordinator.snapshots[second.id]?.windows.first?.usedPercent, 10)
+        XCTAssertEqual(latest[second.id]?.fetchCount, 1)
+    }
+
+    func testRefreshAllStartsDuplicateAccountsWithoutWaitingForEachOther() async {
+        let first = ProviderInstance(provider: .codex)
+        let second = ProviderInstance(provider: .codex)
+        let firstRuntime = GatedProvider(id: .codex)
+        let secondRuntime = GatedProvider(id: .codex)
+        let runtimes: [UUID: any UsageProvider] = [first.id: firstRuntime, second.id: secondRuntime]
+        let coordinator = UsageCoordinator(instances: [first, second]) { runtimes[$0.id]! }
 
         let refresh = Task { @MainActor in await coordinator.refreshAll() }
-        await yieldUntil { first.hasEntered && second.hasEntered }
-        let overlapped = first.hasEntered && second.hasEntered
+        await yieldUntil { firstRuntime.hasEntered && secondRuntime.hasEntered }
+        XCTAssertTrue(firstRuntime.hasEntered && secondRuntime.hasEntered)
 
-        first.releaseGate()
-        second.releaseGate()
-        await yieldUntil { first.hasEntered && second.hasEntered }
-        first.releaseGate()
-        second.releaseGate()
+        firstRuntime.releaseGate()
+        secondRuntime.releaseGate()
         await refresh.value
-
-        XCTAssertTrue(overlapped, "refreshAll should start providers independently")
     }
 
     func testOverlappingRefreshAllRequestsAreCoalesced() async {
-        let provider = GatedProvider(id: .codex)
-        let coordinator = UsageCoordinator(providers: [provider])
+        let instance = ProviderInstance(provider: .codex)
+        let runtime = GatedProvider(id: .codex)
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in runtime }
 
         let firstRefresh = Task { @MainActor in await coordinator.refreshAll() }
-        await yieldUntil { provider.hasEntered }
-        XCTAssertTrue(provider.hasEntered)
-
+        await yieldUntil { runtime.hasEntered }
         await coordinator.refreshAll()
-        XCTAssertEqual(provider.fetchCount, 1)
+        XCTAssertEqual(runtime.fetchCount, 1)
 
-        provider.releaseGate()
+        runtime.releaseGate()
         await firstRefresh.value
     }
 
-    func testSignedOutProviderCannotBeRestoredByOlderInflightRefresh() async {
-        let provider = GatedProvider(id: .qwen)
-        let coordinator = UsageCoordinator(providers: [provider])
+    func testSignedOutAccountCannotBeRestoredByOlderInflightRefresh() async {
+        let instance = ProviderInstance(provider: .qwen)
+        let runtime = GatedProvider(id: .qwen)
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in runtime }
 
-        let refresh = Task { @MainActor in await coordinator.refresh(.qwen) }
-        await yieldUntil { provider.hasEntered }
-        XCTAssertTrue(provider.hasEntered)
+        let refresh = Task { @MainActor in await coordinator.refresh(instance.id) }
+        await yieldUntil { runtime.hasEntered }
 
-        coordinator.markSignedOut(.qwen, message: "Sign in required")
-        provider.releaseGate()
+        coordinator.markSignedOut(instance.id, message: "Sign in required")
+        runtime.releaseGate()
         await refresh.value
 
-        XCTAssertNil(coordinator.snapshots[.qwen])
-        XCTAssertEqual(coordinator.errors[.qwen], "Sign in required")
-        XCTAssertEqual(coordinator.authenticationStates[.qwen], .required)
-        XCTAssertFalse(coordinator.refreshing.contains(.qwen))
+        XCTAssertNil(coordinator.snapshots[instance.id])
+        XCTAssertEqual(coordinator.errors[instance.id], "Sign in required")
+        XCTAssertEqual(coordinator.authenticationStates[instance.id], .required)
+        XCTAssertFalse(coordinator.refreshing.contains(instance.id))
+    }
+
+    func testReaddedDefaultSlotCannotBeRestoredByOlderInflightRefresh() async {
+        let instance = ProviderInstance(
+            id: ProviderInstance.legacyID(for: .codex),
+            provider: .codex)
+        let staleRuntime = GatedProvider(id: .codex)
+        let freshRuntime = CountingProvider(id: .codex, used: 90)
+        var buildCount = 0
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in
+            buildCount += 1
+            if buildCount == 1 { return staleRuntime }
+            return freshRuntime
+        }
+
+        let staleRefresh = Task { @MainActor in await coordinator.refresh(instance.id) }
+        await yieldUntil { staleRuntime.hasEntered }
+
+        coordinator.setEnabledProviders([])
+        coordinator.setEnabledProviders([instance])
+        await coordinator.refresh(instance.id)
+
+        staleRuntime.releaseGate()
+        await staleRefresh.value
+
+        XCTAssertEqual(buildCount, 2)
+        XCTAssertEqual(freshRuntime.fetchCount, 1)
+        XCTAssertEqual(coordinator.snapshots[instance.id]?.windows.first?.usedPercent, 90)
+        XCTAssertEqual(coordinator.authenticationStates[instance.id], .authenticated)
+    }
+
+    private func snapshot(provider: ProviderID, used: Double) throws -> ProviderSnapshot {
+        ProviderSnapshot(
+            provider: provider,
+            planName: nil,
+            windows: [try UsageWindow(
+                kind: .weekly,
+                label: "Weekly",
+                usedPercent: used,
+                resetsAt: nil,
+                resetDescription: nil)],
+            fetchedAt: Date())
     }
 
     private func yieldUntil(_ condition: () -> Bool) async {
-        for _ in 0..<200 where !condition() {
-            await Task.yield()
-        }
+        for _ in 0..<400 where !condition() { await Task.yield() }
     }
 }
 
@@ -189,10 +303,12 @@ private final class StubProvider: UsageProvider {
 @MainActor
 private final class CountingProvider: UsageProvider {
     let id: ProviderID
+    let used: Double
     private(set) var fetchCount = 0
 
-    init(id: ProviderID) {
+    init(id: ProviderID, used: Double) {
         self.id = id
+        self.used = used
     }
 
     func fetch() async throws -> ProviderSnapshot {
@@ -203,7 +319,7 @@ private final class CountingProvider: UsageProvider {
             windows: [try UsageWindow(
                 kind: .weekly,
                 label: "Weekly",
-                usedPercent: 25,
+                usedPercent: used,
                 resetsAt: nil,
                 resetDescription: nil)],
             fetchedAt: Date())
@@ -217,15 +333,11 @@ private final class GatedProvider: UsageProvider {
     private(set) var fetchCount = 0
     private var enteredContinuation: CheckedContinuation<Void, Never>?
 
-    init(id: ProviderID) {
-        self.id = id
-    }
+    init(id: ProviderID) { self.id = id }
 
     func fetch() async throws -> ProviderSnapshot {
         fetchCount += 1
-        if hasEntered {
-            try Task.checkCancellation()
-        } else {
+        if !hasEntered {
             hasEntered = true
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 enteredContinuation = continuation
@@ -234,7 +346,12 @@ private final class GatedProvider: UsageProvider {
         return ProviderSnapshot(
             provider: id,
             planName: nil,
-            windows: [try UsageWindow(kind: .weekly, label: "Weekly", usedPercent: 50, resetsAt: nil, resetDescription: nil)],
+            windows: [try UsageWindow(
+                kind: .weekly,
+                label: "Weekly",
+                usedPercent: 50,
+                resetsAt: nil,
+                resetDescription: nil)],
             fetchedAt: Date())
     }
 

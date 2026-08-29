@@ -61,7 +61,7 @@ final class StatusItemController: NSObject {
 
     private func observeChanges() {
         Publishers.CombineLatest4(
-            settings.$selectedProvider,
+            settings.$selectedProviderInstanceID,
             settings.$metric,
             settings.$registeredProviders,
             coordinator.$snapshots)
@@ -80,22 +80,15 @@ final class StatusItemController: NSObject {
             .store(in: &cancellables)
     }
 
-    /// A menu bar click toggles the dashboard directly under the status item.
-    /// Provider selection remains available by clicking a card in the popover.
     @objc private func handleClick() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
             return
         }
-
-        // Re-evaluate the current screen at open time in case the menu bar was
-        // moved between displays. The popover grows with the number of cards
-        // and only becomes scroll-constrained when it would exceed the screen.
         updatePopoverSize()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
-
         Task { @MainActor [weak self] in
             await self?.coordinator.refreshIfStale(olderThan: 60)
         }
@@ -113,19 +106,13 @@ final class StatusItemController: NSObject {
                 screenHeight: screenHeight))
     }
 
-    /// Uses the actual SwiftUI card-stack height whenever available. The
-    /// conservative fallback prevents the first frame from clipping before
-    /// GeometryReader reports its measurement. Scrolling begins only at the
-    /// usable display-height boundary.
     nonisolated static func preferredPopoverHeight(
         providerCount: Int,
         measuredProviderListHeight: CGFloat,
         screenHeight: CGFloat
     ) -> CGFloat {
         let safeScreenHeight = max(320, screenHeight - 24)
-        if providerCount <= 0 {
-            return min(280, safeScreenHeight)
-        }
+        if providerCount <= 0 { return min(280, safeScreenHeight) }
         let chromeHeight: CGFloat = 118
         let fallbackCardHeight: CGFloat = 330
         let providerListHeight = measuredProviderListHeight > 0
@@ -137,42 +124,42 @@ final class StatusItemController: NSObject {
 
     private func render() {
         guard let button = statusItem.button else { return }
-        guard let provider = settings.selectedProvider else {
+        guard let instance = settings.selectedProvider else {
             let image = renderEmptyImage()
             statusItem.length = image.size.width + 8
             button.image = image
-            button.toolTip = "AIUsage: no providers added\nClick: add a provider"
-            button.setAccessibilityLabel("AIUsage, no providers added. Click to add a provider")
+            button.toolTip = "AIUsage: no provider accounts added\nClick: add an account"
+            button.setAccessibilityLabel("AIUsage, no provider accounts added. Click to add an account")
             return
         }
 
-        let snapshot = coordinator.snapshots[provider]
-        let hasError = coordinator.errors[provider] != nil
-        let title = displayTitle(provider: provider, snapshot: snapshot, hasError: hasError)
-        let image = renderImage(title: title, snapshot: snapshot, provider: provider, hasError: hasError)
+        let snapshot = coordinator.snapshots[instance.id]
+        let hasError = coordinator.errors[instance.id] != nil
+        let title = displayTitle(instance: instance, snapshot: snapshot, hasError: hasError)
+        let image = renderImage(title: title, snapshot: snapshot, provider: instance.provider, hasError: hasError)
         statusItem.length = image.size.width + 8
         button.image = image
-        let tooltip = accessibilityText(provider: provider, snapshot: snapshot, hasError: hasError)
+        let tooltip = accessibilityText(instance: instance, snapshot: snapshot, hasError: hasError)
         button.toolTip = tooltip + "\nClick: show details"
         button.setAccessibilityLabel("AIUsage, \(tooltip)")
     }
 
-    private func displayTitle(provider: ProviderID, snapshot: ProviderSnapshot?, hasError: Bool) -> String {
+    private func displayTitle(instance: ProviderInstance, snapshot: ProviderSnapshot?, hasError: Bool) -> String {
         let base = snapshot.map { MenuBarPresentation.title(snapshot: $0, metric: settings.metric) }
-            ?? "\(provider.shortName) --"
+            ?? "\(instance.provider.shortName) --"
         return hasError ? base + " !" : base
     }
 
-    private func accessibilityText(provider: ProviderID, snapshot: ProviderSnapshot?, hasError: Bool) -> String {
+    private func accessibilityText(instance: ProviderInstance, snapshot: ProviderSnapshot?, hasError: Bool) -> String {
         guard let snapshot else {
-            return "\(provider.displayName): \(hasError ? "needs attention" : "loading")"
+            return "\(instance.title): \(hasError ? "needs attention" : "loading")"
         }
         let values = snapshot.windows.map { window in
             let value = MenuBarPresentation.value(window, metric: settings.metric)
             let metric = settings.metric == .remaining ? "remaining" : "used"
             return "\(window.label) \(PercentFormatter.string(value)) percent \(metric)"
         }.joined(separator: ", ")
-        return "\(provider.displayName): \(values)\(hasError ? ", showing stale data" : "")"
+        return "\(instance.title): \(values)\(hasError ? ", showing stale data" : "")"
     }
 
     private func renderEmptyImage() -> NSImage {
@@ -199,7 +186,7 @@ final class StatusItemController: NSObject {
         let suffix = String(title.dropFirst(prefix.count))
         let prefixAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: brandColor(provider, appearance: statusItem.button?.effectiveAppearance),
+            .foregroundColor: brandColor(provider),
         ]
         let valueColor: NSColor = hasError
             ? .systemOrange
@@ -216,12 +203,10 @@ final class StatusItemController: NSObject {
 
     private func severityColor(_ remaining: Double?) -> NSColor {
         guard let remaining else { return .secondaryLabelColor }
-        return ProviderVisuals.severityRGB(
-            UsageSeverity(remainingPercent: remaining)
-        ).nsColor
+        return ProviderVisuals.severityRGB(UsageSeverity(remainingPercent: remaining)).nsColor
     }
 
-    private func brandColor(_ provider: ProviderID, appearance _: NSAppearance?) -> NSColor {
+    private func brandColor(_ provider: ProviderID) -> NSColor {
         ProviderVisuals.accentRGB(provider).nsColor
     }
 }

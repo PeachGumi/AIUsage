@@ -1,9 +1,15 @@
 import Foundation
 
+enum ProviderAccountAction: Equatable, Sendable {
+    case signInOut
+    case apiKey
+    case account
+}
+
 enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
     case openCodeGo
-    case qwen
     case codex
+    case qwen
     case claude
     case antigravity
     case copilot
@@ -13,9 +19,9 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    /// Providers exposed in the Add Provider UI. Experimental providers are
-    /// intentionally visible so users can validate them and contribute fixes;
-    /// their status is surfaced explicitly in the UI and documentation.
+    /// Providers exposed in the Add Provider UI. Keep this list explicit so a
+    /// work-in-progress enum case cannot become user-visible before its release
+    /// checks, credential boundary and failure behavior are ready.
     static let implemented: [ProviderID] = [
         .openCodeGo,
         .codex,
@@ -56,30 +62,83 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
-    /// Only Codex and OpenCode Go have been validated against real maintainer
-    /// accounts. Every other integration is contract/fixture-tested but remains
-    /// experimental until real-account users confirm it against the provider's
-    /// official usage display and contribute any required fixes.
     var isExperimental: Bool {
+        self != .openCodeGo && self != .codex
+    }
+
+    var supportsMultipleAccounts: Bool {
+        self != .antigravity
+    }
+
+    var accountAction: ProviderAccountAction {
         switch self {
-        case .openCodeGo, .codex:
-            false
-        case .qwen, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
-            true
+        case .openCodeGo, .qwen: .signInOut
+        case .zai: .apiKey
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi: .account
         }
     }
 
-    /// Only these providers have credentials/session state owned by AIUsage.
-    /// Claude, Antigravity, Copilot, Cursor and Kimi reuse external clients'
-    /// existing authentication read-only and therefore are never signed out by
-    /// AIUsage.
-    var managesAuthentication: Bool {
+    var staticDashboardURL: URL? {
         switch self {
-        case .openCodeGo, .qwen, .zai:
-            true
-        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi:
-            false
+        case .openCodeGo: nil
+        case .qwen: URL(string: "https://home.qwencloud.com/billing/subscription/token-plan-individual")!
+        case .codex: URL(string: "https://chatgpt.com/codex/settings/usage")!
+        case .claude: URL(string: "https://claude.ai/settings/usage")!
+        case .antigravity: URL(string: "https://antigravity.google")!
+        case .copilot: URL(string: "https://github.com/settings/billing")!
+        case .cursor: URL(string: "https://cursor.com/dashboard?tab=usage")!
+        case .zai: URL(string: "https://z.ai/manage-apikey/coding-plan/personal/my-plan")!
+        case .kimi: URL(string: "https://www.kimi.com/code/console")!
         }
+    }
+}
+
+struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
+    let id: UUID
+    let provider: ProviderID
+    var accountLabel: String?
+
+    init(id: UUID = UUID(), provider: ProviderID, accountLabel: String? = nil) {
+        self.id = id
+        self.provider = provider
+        self.accountLabel = Self.cleanedLabel(accountLabel)
+    }
+
+    var title: String {
+        accountLabel.map { "\(provider.displayName) · \($0)" } ?? provider.displayName
+    }
+
+    /// The stable slot allowed to reuse ambient credentials owned by an external client.
+    var isDefaultSlot: Bool {
+        id == Self.legacyID(for: provider)
+    }
+
+    func withAccountLabel(_ value: String?) -> ProviderInstance {
+        ProviderInstance(id: id, provider: provider, accountLabel: value)
+    }
+
+    /// Historical UUID values are preserved so old one-card settings migrate in place.
+    static func legacyID(for provider: ProviderID) -> UUID {
+        let suffix: String = switch provider {
+        case .openCodeGo: "000000000001"
+        case .qwen: "000000000002"
+        case .codex: "000000000003"
+        case .claude: "000000000004"
+        case .antigravity: "000000000005"
+        case .copilot: "000000000006"
+        case .cursor: "000000000007"
+        case .zai: "000000000008"
+        case .kimi: "000000000009"
+        }
+        guard let id = UUID(uuidString: "A1A6E000-0000-4000-8000-\(suffix)") else {
+            preconditionFailure("Internal provider UUID is invalid")
+        }
+        return id
+    }
+
+    private static func cleanedLabel(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : String(trimmed.prefix(80))
     }
 }
 
@@ -93,10 +152,7 @@ struct ProviderSnapshot: Equatable, Sendable {
         self.provider = provider
         self.planName = planName
         self.windows = windows.sorted {
-            if $0.kind.sortOrder != $1.kind.sortOrder {
-                return $0.kind.sortOrder < $1.kind.sortOrder
-            }
-            return $0.id < $1.id
+            ($0.kind.sortOrder, $0.id) < ($1.kind.sortOrder, $1.id)
         }
         self.fetchedAt = fetchedAt
     }

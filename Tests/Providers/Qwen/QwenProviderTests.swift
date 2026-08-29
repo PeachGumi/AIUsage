@@ -18,6 +18,27 @@ final class QwenProviderTests: XCTestCase {
         XCTAssertFalse(body.contains("plan & tier"))
     }
 
+    func testQwenSessionRejectsRedirectsAndSharedCredentialState() {
+        let session = QwenProvider.makeSession()
+
+        XCTAssertTrue(session.delegate is RejectRedirectDelegate)
+        XCTAssertNil(session.configuration.urlCache)
+        XCTAssertNil(session.configuration.httpCookieStorage)
+        XCTAssertFalse(session.configuration.httpShouldSetCookies)
+        XCTAssertNil(session.configuration.urlCredentialStorage)
+    }
+
+    func testMajorProviderSessionRejectsRedirectsAndSharedCredentialState() {
+        let session = MajorProviderHTTP.session()
+
+        XCTAssertTrue(session.delegate is RejectRedirectDelegate)
+        XCTAssertNil(session.configuration.urlCache)
+        XCTAssertEqual(session.configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertNil(session.configuration.httpCookieStorage)
+        XCTAssertFalse(session.configuration.httpShouldSetCookies)
+        XCTAssertNil(session.configuration.urlCredentialStorage)
+    }
+
     func testParsesSecTokenAndRecognizesExpiredSession() throws {
         let valid = Data(#"{"code":"Success","data":{"secToken":"secure-token"}}"#.utf8)
         let expired = Data(#"{"code":"ConsoleNeedLogin"}"#.utf8)

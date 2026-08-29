@@ -8,10 +8,15 @@ final class QwenProvider: UsageProvider {
 
     init(
         session: URLSession = QwenProvider.makeSession(),
-        cookieSource: @escaping (URL) async throws -> String = { try await QwenCookieRepository.shared.header(for: $0) })
+        cookieSource: ((URL) async throws -> String)? = nil)
     {
         self.session = session
-        self.cookieSource = cookieSource
+        if let cookieSource {
+            self.cookieSource = cookieSource
+        } else {
+            let repository = QwenCookieRepository()
+            self.cookieSource = { url in try await repository.header(for: url) }
+        }
     }
 
     func fetch() async throws -> ProviderSnapshot {

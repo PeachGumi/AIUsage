@@ -29,4 +29,23 @@ final class ProviderVisualsTests: XCTestCase {
             XCTAssertEqual(ProviderVisuals.accentRGB(provider), rgb, provider.displayName)
         }
     }
+
+    func testEveryProviderHasTheExpectedAccountAction() {
+        let expected: [ProviderID: ProviderAccountAction] = [
+            .openCodeGo: .signInOut,
+            .qwen: .signInOut,
+            .zai: .apiKey,
+            .codex: .account,
+            .claude: .account,
+            .antigravity: .account,
+            .copilot: .account,
+            .cursor: .account,
+            .kimi: .account,
+        ]
+
+        XCTAssertEqual(Set(expected.keys), Set(ProviderID.implemented))
+        for (provider, action) in expected {
+            XCTAssertEqual(provider.accountAction, action, provider.displayName)
+        }
+    }
 }

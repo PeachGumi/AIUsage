@@ -1,8 +1,8 @@
 <div align="center">
   <img src="docs/icon.png" width="128" alt="AIUsage icon">
   <h1>AIUsage</h1>
-  <p><strong>複数のAIサービスの使用枠を、macOSのメニューバーからまとめて確認。</strong></p>
-  <p>必要なプロバイダーだけを追加して、残量・リセット時刻・取得状態をひとつのPopoverで確認できる、軽量なmacOSメニューバーアプリです。</p>
+  <p><strong>複数のAIサービス・複数アカウントの使用枠を、macOSのメニューバーからまとめて確認。</strong></p>
+  <p>必要なアカウントだけを追加して、残量・リセット時刻・取得状態をひとつのPopoverで確認できる軽量なmacOSメニューバーアプリです。</p>
 
   <p>
     <a href="https://github.com/PeachGumi/AIUsage/actions/workflows/ci.yml"><img src="https://github.com/PeachGumi/AIUsage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -10,33 +10,24 @@
     <img src="https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white" alt="Swift 5.9">
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   </p>
-
-  <p>
-    <a href="#特徴">特徴</a> ·
-    <a href="#インストール">インストール</a> ·
-    <a href="#使い方">使い方</a> ·
-    <a href="#対応プロバイダー">対応プロバイダー</a> ·
-    <a href="#トラブルシューティング">FAQ</a> ·
-    <a href="#開発">開発</a>
-  </p>
 </div>
 
 > [!IMPORTANT]
-> AIUsageは各プロバイダーの公式アプリ・公式SDKではありません。使用量の取得には、各サービスの非公開または安定性が保証されていないendpoint / ローカルクライアント情報を利用しています。サービス側の変更により、一時的に取得できなくなる可能性があります。
+> AIUsageは各Providerの公式アプリ・公式SDKではありません。使用量取得には、公式クライアントのローカル状態や、安定性が保証されていないusage endpoint / ローカルinterfaceを利用する統合があります。Provider側の変更により一時的に取得できなくなる可能性があります。
 
 > [!WARNING]
-> 実アカウントで検証済みなのは **OpenCode Go / OpenAI Codexのみ** です。Qwen Cloud、Claude、Antigravity、GitHub Copilot、Cursor、Z.AI、Kimi Codeはfixtureテスト済みの実験的統合で、Add Provider画面でもExperimentalと表示されます。表示値は必ず公式dashboardと照合してください。
+> 実アカウントで検証済みなのは **OpenCode Go / OpenAI Codexのみ** です。Qwen Cloud、Claude、Antigravity、GitHub Copilot、Cursor、Z.AI、Kimi CodeはExperimentalです。表示値は公式dashboardと照合してください。
 
 ## 特徴
 
-- **使うサービスだけ追加** — 初回起動は0件。登録していないプロバイダーにはusage取得通信を行いません。
-- **メニューバーだけで残量を確認** — 選択したプロバイダーの使用枠を常時コンパクトに表示します。
-- **1クリックで全体表示** — メニューバー直下のPopoverに、登録済みプロバイダーをカード形式で表示します。
-- **複数プロバイダーを独立更新** — 1サービスが遅い・失敗した場合でも、ほかのサービスの更新を巻き込みません。
-- **最後に取得できた値を保持** — 一時的な通信失敗時は、直前の正常値をstale表示として残します。
-- **ドラッグで並び替え** — カードの順序を変更し、任意のプロバイダーをメニューバー表示へ固定できます。
-- **画面サイズに合わせて伸縮** — Provider数が少ない間はPopover自体を縦に伸ばし、画面に収まらなくなった時だけ内部スクロールします。
-- **ローカル中心の設計** — 独自サーバー、広告SDK、分析SDK、テレメトリーはありません。
+- **複数アカウント** — OpenAI Codex、Claude、OpenCode GoなどをPersonal / Workの別カードとして登録できます。
+- **UUID単位で状態を分離** — snapshot、error、認証状態、更新状態、並び順、メニューバー固定先をカードごとに管理します。
+- **ambient認証は1枚目だけ** — 外部CLI/アプリの通常ログインを使えるのは各Providerのstable default cardだけ。2枚目以降は明示的なcredentialが必要です。
+- **使うアカウントだけ追加** — 初回起動は0件。未登録Providerへusage取得通信を行いません。
+- **独立更新** — 1アカウントの遅延・失敗がほかのカードを待たせません。
+- **stale snapshotを保持** — 一時的な通信失敗では直前の正常値を残します。
+- **ドラッグで並び替え** — 任意のカードをメニューバー表示へ固定できます。
+- **ローカル中心** — 独自バックエンド、広告SDK、分析SDK、テレメトリーはありません。
 
 ## インストール
 
@@ -51,8 +42,6 @@
 > [!NOTE]
 > 現在、GitHub Releasesで一般ユーザー向けの署名・公証済みバイナリは配布していません。現時点での正式な導入方法はソースからのビルドです。
 
-### 最短で試す
-
 ```bash
 git clone https://github.com/PeachGumi/AIUsage.git
 cd AIUsage
@@ -60,15 +49,7 @@ cd AIUsage
 open build/dist/AIUsage.app
 ```
 
-`build_release.sh` は次を順番に実行します。
-
-1. Unit Tests
-2. Release build
-3. ad-hoc署名
-4. ZIP作成
-5. SHA-256 checksum作成
-
-生成物:
+`build_release.sh` はUnit Tests → Release build → ad-hoc署名 → ZIP → SHA-256 checksumを実行します。
 
 ```text
 build/dist/AIUsage.app
@@ -76,154 +57,166 @@ build/dist/AIUsage-macOS.zip
 build/dist/AIUsage-macOS.zip.sha256
 ```
 
-この署名はローカル利用・検証向けの**ad-hoc署名**です。Developer ID署名やApple notarizationではありません。
-
-### Xcodeから起動する
-
-`AIUsage.xcodeproj` をXcode 16.2以降で開き、`AIUsage` schemeを選んでRunしてください。
-
-通常のビルドとCIは、リポジトリにコミットされている `AIUsage.xcodeproj` を使用します。`project.yml` はプロジェクト構成の宣言にも利用しますが、日常のビルドにXcodeGenは必要ありません。
+この署名はローカル利用・検証向けのad-hoc署名で、Developer ID署名やApple notarizationではありません。
 
 ## 使い方
 
 1. AIUsageを起動します。初回はメニューバーに `AI +` と表示されます。
-2. `AI +` をクリックしてPopoverを開きます。
-3. 右上の **+** から使いたいプロバイダーを追加します。
-4. 必要なら各カードの認証案内に従います。OpenCode Go / Qwenは **Sign in**、Z.AIは **API key…**、それ以外は公式ローカルクライアントの既存認証を読み取り専用で利用します。
-5. カードをクリックすると、そのプロバイダーがメニューバー表示へ固定されます。
-6. 左端のドラッグハンドルでカードを並び替えられます。
-7. **Settings** からメニューバーに表示する値を「Remaining / Used」で切り替えられます。
+2. Popover右上の **+** からProviderを追加します。
+3. 1枚目は必要に応じて通常のCLI / アプリloginまたはAIUsage内Web loginを利用します。
+4. 同じProviderの2枚目以降を追加した場合は **Account… / Sign in / API key…** から、そのカード専用の認証元を設定します。
+5. **Rename…** で `Personal` / `Work` などのローカル表示名を付けられます。
+6. カードをクリックすると、そのアカウントがメニューバー表示へ固定されます。
+7. 左端のドラッグハンドルで並び替えられます。
+8. **Settings** からRemaining / Usedを切り替えられます。
 
-登録済みプロバイダーだけが、起動時・定期更新・Popover表示時・Refresh Allの対象になります。バックグラウンド更新間隔は5分です。
+登録済みカードだけが起動時・定期更新・Popover表示時・Refresh Allの対象です。バックグラウンド更新間隔は5分です。
 
-### カードの操作
+### カード操作
 
 | 操作 | 内容 |
 |---|---|
-| `Refresh` | そのプロバイダーだけ再取得 |
-| `Sign in` | OpenCode Go / QwenのAIUsage内Webログインを開始 |
-| `API key…` | Z.AI Coding PlanのAPI keyをmacOS Keychainへ保存 |
-| `Sign out` | AIUsageが所有するWebログインまたはAPI keyだけを削除 |
-| `Open dashboard` | 各サービスの使用量ページをブラウザで開く |
-| `Remove` | AIUsageの登録一覧から外す。ログアウトはしない |
+| `Refresh` | そのカードだけ再取得 |
+| `Sign in` | OpenCode Go / Qwenのカード専用WebKit sessionへログイン |
+| `Account…` | Codex / Claudeのcredential file、Copilot / Cursor / Kimiのカード固有credentialなどを設定 |
+| `API key…` | Z.AIのカード固有API keyをKeychainへ保存 |
+| `Sign out` | AIUsageが所有するWeb login / API keyを削除できるProviderでログアウト |
+| `Rename…` | ローカル表示名を変更 |
+| `Open dashboard` | Providerの使用量ページを開く |
+| `Remove` | カードを削除し、そのUUID専用のAIUsage所有credential / session / pathを掃除 |
 
-### Remove と Sign out の違い
+## 複数アカウントの設計
 
-**Remove** は「AIUsageで監視しない」にする操作です。再追加しやすいよう、WebKitのログインセッションやCodex CLIの認証状態は消しません。
+AIUsageでは統合種別とカードを分けています。
 
-**Sign out** はAIUsageが所有する認証状態だけを削除する操作です。OpenCode Goでは保存済みworkspace IDも削除します。Codex / Claude / Antigravity / GitHub Copilot / Cursor / Kimiの既存クライアント認証は読み取り専用で、AIUsageから削除しません。
+- `ProviderID` — OpenAI Codex、Claude、Cursorなどの統合種別
+- `ProviderInstance` — 固有UUIDを持つ1アカウントカード
 
-## 対応プロバイダー
+各Providerの**最初のカードはstable default slot**です。旧バージョンからの移行IDと同じstable UUIDを使い、このカードだけが通常のCLI / アプリのambient credentialを利用できます。
 
-| プロバイダー | 状態 | 表示する使用枠 | 認証 / 取得方式 |
+追加カードはランダムUUIDを持ち、別アカウントとして明示的に設定します。これにより、credential未設定の2枚目が1枚目と同じアカウントを黙って表示することを防ぎます。
+
+### Provider別の分離
+
+| Provider | default card | 追加カード |
+|---|---|---|
+| OpenCode Go | default WebKit profile / 旧workspace移行 | UUID別persistent WebKit profile + workspace ID |
+| Qwen Cloud | default WebKit profile / 旧Cookie移行 | UUID別persistent WebKit profile + Cookie repository |
+| OpenAI Codex | 通常のCodex `auth.json` | 別profileの`auth.json`を **Account…** で選択必須 |
+| Claude | 通常のClaude Code credential | 別credential fileを **Account…** で選択必須 |
+| GitHub Copilot | `GH_TOKEN` / `GITHUB_TOKEN` / GitHub CLI | カード固有GitHub tokenをKeychainへ保存必須 |
+| Cursor | Cursor.appの現在のlogin | カード固有access tokenをKeychainへ保存必須 |
+| Z.AI | legacy key / environmentも互換利用可 | UUID別API key必須 |
+| Kimi Code | Kimi CLI / environment | カード固有API keyをKeychainへ保存必須 |
+| Antigravity | 公式Antigravityの現在のlocal session | **現在は追加不可** |
+
+### Antigravity
+
+Antigravityは現在Experimentalで、**1つのlocal sessionだけ**を表示します。AIUsageは実行中の公式Antigravityプロセスからlocalhost上のusage情報を取得し、Google OAuth tokenを作成・保存したり、Googleのremote quota endpointへ直接アクセスしたりしません。
+
+Antigravityの2アカウント目は現時点では追加できません。将来は、公式Antigravity CLIがcustom status-line scriptへ渡すdocumented JSON（quota / email / plan tierなど）を使ったpassive local integrationへ移行する予定です。第三者OAuth credentialを再利用する方式は採用しません。
+
+> [!NOTE]
+> 現行Antigravity integrationは実行中のlocal processを検出するため、Antigravityを起動・ログインした状態でRefreshしてください。
+
+### Remove と外部ログアウト
+
+**Remove** はカードUUIDに属するAIUsage所有データを掃除します。
+
+- UUID別Keychain secretを削除
+- Codex / Claudeで選択したcredential file pathを削除（ファイル本体は削除しない）
+- 新規OpenCode / Qwenカードの専用WebKit sessionとworkspace情報を削除
+- in-flight取得を無効化し、古い結果が削除済みカードへ戻らないようにする
+
+一方、Codex CLI、Claude Code、GitHub CLI、Cursor.app、Kimi Code、Antigravityなど**外部クライアントが所有する認証情報は変更・削除しません**。
+
+## 対応Provider
+
+| Provider | 状態 | 使用枠 | 認証 / 取得方式 |
 |---|---|---|---|
-| **OpenCode Go** | 検証済み | 5-hour / Weekly / Monthly | AIUsage内Webログイン |
-| **OpenAI Codex** | 検証済み | 5-hour / Weekly | Codex CLIの既存OAuthを読み取り専用で利用 |
-| **Qwen Cloud** | Experimental | 5-hour / Weekly | AIUsage内Webログイン |
-| **Claude** | Experimental | 5-hour / Weekly | Claude Codeの既存OAuthを読み取り専用で利用 |
-| **Antigravity** | Experimental | Gemini / third-partyの5-hour・Weekly | ローカルAntigravityプロセスを検出してlocalhostへ問い合わせ |
-| **GitHub Copilot** | Experimental | Monthly quota | `GH_TOKEN` / `GITHUB_TOKEN` またはGitHub CLI認証を利用 |
-| **Cursor** | Experimental | Monthly usage pools | Cursor.appの既存認証DBを読み取り専用で利用 |
-| **Z.AI GLM** | Experimental | 5-hour / Weekly | AIUsageのKeychainに保存したCoding Plan API keyを利用 |
-| **Kimi Code** | Experimental | 5-hour / Weekly | Kimi Code CLI認証または`KIMI_CODE_API_KEY`を利用 |
+| **OpenCode Go** | 検証済み | 5-hour / Weekly / Monthly | AIUsage内Web login。カードごとにWebKit分離 |
+| **OpenAI Codex** | 検証済み | 5-hour / Weekly | defaultはCodex CLI OAuth、追加カードは別`auth.json` |
+| **Qwen Cloud** | Experimental | 5-hour / Weekly | AIUsage内Web login。カードごとにWebKit分離 |
+| **Claude** | Experimental | 5-hour / Weekly | defaultはClaude Code OAuth、追加カードは別credential file |
+| **Antigravity** | Experimental | Gemini / Claude・GPTの5-hour / Weekly | 実行中の公式Antigravity local process。現在1カードのみ |
+| **GitHub Copilot** | Experimental | Monthly quota | defaultはGitHub CLI/env、追加カードはKeychain token |
+| **Cursor** | Experimental | Monthly usage pools | defaultはCursor.app、追加カードはKeychain token |
+| **Z.AI GLM** | Experimental | 5-hour / Weekly | UUID別Coding Plan API key |
+| **Kimi Code** | Experimental | 5-hour / Weekly | defaultはKimi CLI/env、追加カードはKeychain API key |
 
-Experimental統合は未知のレスポンス形状を0%として推測せず、エラーとしてfail closedします。実アカウントで公式dashboardとの一致を確認できた場合は、秘密情報を除いた検証報告や修正Pull Requestを歓迎します。
+Experimental統合は未知のレスポンス形状を0%として推測せず、エラーとしてfail closedします。
 
-## 表示と更新の仕組み
+> [!NOTE]
+> **Experimental Providerの実アカウント検証・修正に協力してくださる方を募集しています。** Qwen Cloud、Claude、Antigravity、GitHub Copilot、Cursor、Z.AI、Kimi Codeを利用している方から、公式dashboardとの照合結果をもとにしたfixture / parser / integration修正のPull Requestを歓迎します。OAuth token、API key、Cookie、account ID、workspace ID、認証済みAPIレスポンス全文などの秘密情報はIssueやPull Requestへ含めないでください。
 
-- メニューバーには選択中の1プロバイダーだけを短縮表示します。
-- Popoverには登録済みプロバイダーをすべて表示します。
+## 表示と更新
+
+- メニューバーには選択中の1カードを表示します。
+- Popoverには登録済みカードをすべて表示します。
 - Popoverを開いた時、直近の全体更新から60秒以上経過していれば更新します。
-- アプリがアクティブになった時・Macがスリープから復帰した時は、直近の全体更新から120秒以上経過していれば更新します。
+- アプリがactiveになった時・スリープ復帰時は120秒以上古ければ更新します。
 - 定期更新は5分間隔です。
-- 全体更新はプロバイダーごとに独立して開始され、遅いプロバイダーがほかを待たせません。
-- 同時に複数の全体更新要求が発生した場合は重複実行を抑制します。
-- 新しい更新やSign out / Removeで無効になった古い非同期結果は破棄します。
-
-エラーが発生しても過去の正常なsnapshotがある場合は値を残し、stale状態として表示します。これにより、一時的な通信障害だけで使用量表示が完全に消えることを避けています。
+- 全体更新はカードごとに独立して開始します。
+- 重複する全体更新要求はcoalesceします。
+- newer refresh / Sign out / Removeで無効になった古い非同期結果は破棄します。
+- 一時的な失敗では直前の正常snapshotと認証済み状態を不必要に破壊しません。
 
 ## プライバシーとセキュリティ
-
-AIUsageは、認証済みセッションを扱うアプリとして「必要な宛先に必要な情報だけを送る」ことを重視しています。
 
 | 項目 | 方針 |
 |---|---|
 | 独自バックエンド | なし |
 | 分析 / 広告 / テレメトリー | なし |
-| 未登録プロバイダーへのusage取得 | 行わない |
-| 外部クライアント認証 | Codex / Claude / Antigravity / GitHub CLI / Cursor / Kimiの状態は読み取り専用。AIUsageから変更・削除しない |
-| AIUsage所有の資格情報 | Z.AI API keyはmacOS Keychain、OpenCode / QwenはWebKitデータストアへ保存 |
-| Provider HTTPセッション | ephemeral。共有Cookie・資格情報・URL cacheを使わない |
-| 資格情報付きHTTP redirect | 拒否 |
-| Qwen Cookie | HTTPSかつ送信先domain/path/expiryを確認して明示ヘッダーを構築 |
-| OpenCode / Qwen Webログイン | macOS標準のWebKitデータストアを利用 |
-| ログ | OAuth token、Cookie、account ID、workspace ID、実usage本文を出力しない |
-
-旧アプリからの移行についても、古い認証情報を永続的なフォールバックとして使い続けない設計です。
-
-- 旧QwenUsageの平文Cookieは `https://home.qwencloud.com` への一度限りの移行用途に限定します。
-- AIUsageでQwenログインが成功した後、またはSign out後は旧Cookieを再利用しません。
-- 旧GoUsageのworkspace IDも一度限りの移行元として扱います。
+| 未登録Providerへのusage取得 | 行わない |
+| 状態分離 | ProviderInstance UUID単位 |
+| ambient credential | stable default cardだけ |
+| 追加カード | 明示credential必須。兄弟カードへfallbackしない |
+| AIUsage所有secret | macOS Keychain |
+| OpenCode / Qwen | UUID別WebKit data store |
+| Provider HTTP session | ephemeral、共有Cookie / credential / URL cacheなし |
+| credential付きHTTP redirect | 拒否 |
+| 外部client credential | 読み取り専用。AIUsageから変更・削除しない |
+| ログ | OAuth token、API key、Cookie、account ID、workspace ID、実usage本文を出力しない |
 
 詳細は [PRIVACY.md](PRIVACY.md) と [SECURITY.md](SECURITY.md) を参照してください。
 
 > [!CAUTION]
-> 不具合報告にOAuth token、Cookie、Cookie header、account ID、workspace ID、認証済みAPIレスポンス全文を貼らないでください。Provider側の仕様変更を報告するIssue Formも、サニタイズ済み情報だけを前提にしています。
-
-## 制約と注意事項
-
-- 各サービスの公式usage SDKを使用しているわけではありません。
-- 非公開endpointやDOM構造は予告なく変更される可能性があります。
-- 上流の仕様変更直後は、一部プロバイダーだけ取得できなくなることがあります。
-- OpenCode Go / OpenAI Codex以外はExperimentalで、実アカウントとの一致を保証していません。
-- GitHub Releasesによる署名・公証済み配布と自動アップデートはまだ提供していません。
-- 各サービス名・商標は各権利者に帰属し、AIUsageは各社から承認・提携を受けた製品ではありません。
+> IssueやPull RequestへOAuth token、API key、Cookie、account ID、workspace ID、認証済みAPIレスポンス全文を貼らないでください。
 
 ## トラブルシューティング
 
 <details>
-<summary><strong>起動したがProviderが何も表示されない</strong></summary>
+<summary><strong>Providerが何も表示されない</strong></summary>
 
-正常です。AIUsageは初回起動時にプロバイダーを自動登録しません。メニューバーの `AI +` をクリックし、Popover右上の **+** から使うプロバイダーを追加してください。
-
-</details>
-
-<details>
-<summary><strong><code>Codex login not found</code> と表示される</strong></summary>
-
-Codex CLIでログイン済みか確認してください。AIUsageは既存の `~/.codex/auth.json` を読み取りますが、ログイン処理や認証ファイルの書き換えは行いません。
+正常です。初回は0件です。Popover右上の **+** から追加してください。
 
 </details>
 
 <details>
-<summary><strong><code>Qwen Cloud login is required</code> と表示される</strong></summary>
+<summary><strong>2枚目のカードが認証エラーになる</strong></summary>
 
-Qwen Cloudカードの **Sign in** からログインしてください。旧QwenUsageのCookieファイルは移行用フォールバックに限って参照され、AIUsageで新しいログインが成功した後には再利用されません。
-
-</details>
-
-<details>
-<summary><strong><code>OpenCode login is required</code> と表示される</strong></summary>
-
-OpenCode Goカードの **Sign in** からログインしてください。ログイン後に検出したworkspace IDはローカルのUserDefaultsへ保存されます。
+意図した動作です。外部CLI/アプリのambient loginはdefault cardだけに限定しています。2枚目は **Account… / Sign in / API key…** から別アカウントを設定してください。
 
 </details>
 
 <details>
-<summary><strong>昨日まで取得できていたのに、急に失敗するようになった</strong></summary>
+<summary><strong>Antigravityを2枚追加できない</strong></summary>
 
-まずカードの **Refresh** を試してください。継続する場合は、Provider側の非公開APIまたはDOM変更の可能性があります。
-
-1. [既存Issue](https://github.com/PeachGumi/AIUsage/issues)を検索する
-2. 同じ問題がなければ、Provider breakage用Issue Formから報告する
-3. 認証情報や実APIレスポンス全文は貼らない
+現在は1 local sessionだけ対応しています。第三者Google OAuthによる複数アカウント化は行いません。公式CLIのstatus-line payloadを使う方式を今後の候補にしています。
 
 </details>
 
 <details>
-<summary><strong>RemoveしたProviderを再追加したらログイン状態が残っている</strong></summary>
+<summary><strong>Antigravityが取得できない</strong></summary>
 
-仕様です。Removeは監視対象から外す操作であり、Sign outではありません。認証状態まで削除したい場合は、Removeする前に **Sign out** を実行してください。
+公式Antigravityを起動し、ログインしてからRefreshしてください。現在のExperimental integrationは実行中local processを検出します。
+
+</details>
+
+<details>
+<summary><strong>Removeすると何が消える？</strong></summary>
+
+そのカードUUIDだけに属するAIUsage所有credential、credential path、新規OpenCode / Qwenカードの専用sessionなどを削除します。外部CLI/アプリの認証自体は削除しません。
 
 </details>
 
@@ -236,26 +229,21 @@ flowchart LR
     Status[NSStatusItem / NSPopover] --> Dashboard[SwiftUI Dashboard]
     Dashboard --> Settings[SettingsStore]
     Dashboard --> Coordinator[UsageCoordinator]
-    Settings -->|registered providers| Coordinator
-    Coordinator --> Codex[CodexProvider]
-    Coordinator --> Qwen[QwenProvider]
-    Coordinator --> OpenCode[OpenCodeGoProvider]
-    Codex --> ChatGPT[chatgpt.com usage endpoint]
-    Qwen --> QwenCloud[qwencloud.com endpoints]
-    OpenCode --> OpenCodeWeb[opencode.ai Web UI]
+    Settings -->|ProviderInstance UUIDs| Coordinator
+    Coordinator --> Runtime[UsageProvider runtime per instance]
+    Runtime --> Files[Codex / Claude credential files]
+    Runtime --> Web[OpenCode / Qwen WebKit profiles]
+    Runtime --> Local[Antigravity local process]
+    Runtime --> Keys[Copilot / Cursor / Z.AI / Kimi Keychain]
 ```
 
-責務は大きく次のように分離しています。
-
-- `Sources/App` — アプリ起動、status item、Provider actionの配線
-- `Sources/Core` — Provider共通モデル、登録設定、更新調停
-- `Sources/Providers` — 認証情報の読み取り、通信、DOM/API解析
-- `Sources/UI` — Popover、設定画面、ログイン画面
-- `Tests` — Core / Provider / UI / opt-in live integration tests
+- `Sources/App` — 起動、status item、ProviderInstance action、credential配線
+- `Sources/Core` — Provider共通モデル、永続設定、更新調停
+- `Sources/Providers` — 通信、認証情報の読み取り、parser
+- `Sources/UI` — Popover、Settings、Web login
+- `Tests` — Core / Provider / UI / opt-in live tests
 
 ### テスト
-
-通常のCIは実アカウントや秘密情報を使わないfixture / stubだけで実行します。
 
 ```bash
 xcodebuild test \
@@ -264,11 +252,7 @@ xcodebuild test \
   -destination 'platform=macOS' \
   CODE_SIGNING_ALLOWED=NO \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
-```
 
-Release build:
-
-```bash
 xcodebuild build \
   -project AIUsage.xcodeproj \
   -scheme AIUsage \
@@ -277,11 +261,11 @@ xcodebuild build \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 ```
 
-CIではさらに、すべてのSwiftファイルがコミット済みXcode projectのSources build phaseへ登録されていること、release scriptのshell構文、Swift compiler warningがないことを検査します。
+CIではSwift sourceのXcode project登録漏れ、release scriptのshell構文、compiler warningも検査します。
 
-### 実アカウントを使うLive Tests
+### Live Tests
 
-Live Testsは明示的にopt-inしたローカル環境でのみ実行します。
+実アカウントLive Testsは明示的opt-in時だけ実行します。
 
 ```bash
 touch /tmp/aiusage-live-tests-enabled
@@ -294,21 +278,23 @@ xcodebuild test \
 rm -f /tmp/aiusage-live-tests-enabled
 ```
 
-Live Testsでも、OAuth tokenやCookie、実使用率そのものはログへ出さない方針です。
+Live Testsでもtoken、Cookie、実使用率をログへ出しません。
 
-### 新しいプロバイダーを追加する
+### Provider追加ルール
 
-新規プロバイダーは、実装を作っただけではユーザーへ公開しません。
+新しいProviderは実装だけで公開しません。
 
-1. `ProviderID` を追加
-2. `UsageProvider` 実装を `Sources/Providers` に追加
-3. 認証情報の境界と送信先を明確化
-4. parser / transport / failure behaviorをfixtureでテスト
-5. `AppDelegate` のprovider registryへ実装を登録
-6. 実アカウントで確認できる場合はopt-in Live Testで検証
-7. 公開可能な品質になってから `ProviderID.implemented` へ追加
+1. `ProviderID`を追加
+2. `UsageProvider`を実装
+3. default cardとduplicate cardのcredential sourceを明確化
+4. 兄弟instanceへのambient fallbackを禁止
+5. 認証情報の送信先を明確化
+6. parser / transport / failure behaviorをfixtureでテスト
+7. duplicate instanceのrefresh / remove / rebuild / sign-out分離をテスト
+8. 実アカウントで可能ならLive Test
+9. 公開品質になってから`ProviderID.implemented`へ追加
 
-詳しいルールは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+詳しくは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ## ロードマップ
 
@@ -316,10 +302,12 @@ Live Testsでも、OAuth tokenやCookie、実使用率そのものはログへ�
 
 主なテーマ:
 
+- Experimental Providerの実アカウント検証
+- Antigravity公式CLI status-line payloadによるpassive local integration / multi-account検討
 - Qwen / OpenCodeの追加fault injection
 - login lifecycle / UI end-to-end tests
-- Provider仕様変更を検知しやすくするcontract tests
-- アクセシビリティとmulti-display検証
+- Provider仕様変更を検知するcontract tests
+- アクセシビリティ / multi-display検証
 - GitHub Releases / インストール導線
 - changelog / screenshots
 
@@ -327,18 +315,16 @@ Live Testsでも、OAuth tokenやCookie、実使用率そのものはログへ�
 
 Issue / Pull Requestを歓迎します。Provider連携は認証済みセッションと不安定な上流仕様を扱うため、変更前に [CONTRIBUTING.md](CONTRIBUTING.md) の安全要件を確認してください。
 
-通常のバグは [Issues](https://github.com/PeachGumi/AIUsage/issues) から、Provider側の変更が疑われる場合は専用のProvider breakage Issue Formから報告できます。
-
 ## セキュリティ報告
 
 脆弱性や認証情報漏えいにつながる問題については、公開Issueへ秘密情報を書かず [SECURITY.md](SECURITY.md) の手順に従ってください。
 
 ## ライセンス
 
-[MIT License](LICENSE) で公開しています。
+[MIT License](LICENSE)
 
-各サービス名・ロゴ・商標は各権利者に帰属します。AIUsageはOpenCode、OpenAI、Qwenその他のサービス提供者とは独立した非公式プロジェクトです。
+各サービス名・ロゴ・商標は各権利者に帰属します。AIUsageは各Providerから承認・提携を受けた製品ではありません。
 
 ## 謝辞
 
-OpenAI Codexの使用量取得方式を調査する際、MITライセンスの [CodexBar](https://github.com/steipete/CodexBar) を参考にしています。ライセンス表記の詳細は [NOTICE](NOTICE) を参照してください。
+OpenAI CodexおよびProvider usage統合の調査では、MITライセンスの [CodexBar](https://github.com/steipete/CodexBar) を参考にしています。詳細は [NOTICE](NOTICE) を参照してください。

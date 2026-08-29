@@ -21,8 +21,13 @@ enum CodexAuth {
         fileManager: FileManager = .default) throws -> CodexCredentials
     {
         let home = codexHome(environment: environment, fileManager: fileManager)
-        let file = home.appendingPathComponent("auth.json", isDirectory: false)
-        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
+        return try load(fileURL: home.appendingPathComponent("auth.json", isDirectory: false))
+    }
+
+    /// Reads an explicitly selected auth.json for one provider instance. The
+    /// file remains owned by Codex; AIUsage never modifies it.
+    static func load(fileURL: URL) throws -> CodexCredentials {
+        guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
             throw CodexAuthError.notFound
         }
         return try parse(data: data)
@@ -59,7 +64,7 @@ enum CodexAuthError: LocalizedError, ProviderAuthenticationError {
 
     var errorDescription: String? {
         switch self {
-        case .notFound: "Codex login not found. Run codex login first."
+        case .notFound: "Codex login not found. Run codex login first or choose an account auth.json."
         case .invalidFile: "Codex auth.json could not be read. Run codex login again if the problem continues."
         case .missingOAuthToken: "Codex auth.json has no OAuth access token. Run codex login again."
         }
