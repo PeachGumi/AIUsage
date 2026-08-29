@@ -38,19 +38,22 @@ struct AppActions {
     let quit: () -> Void
 }
 
-/// Main popover content. ProviderID identifies an integration type while each
-/// ProviderInstance is an independent account/card, so duplicates are valid.
+private struct ProviderDragState {
+    let instanceID: UUID
+    let startFrame: CGRect
+    let slots: [CGRect]
+    var currentIndex: Int
+    var translation: CGSize = .zero
+    var dropTarget: UUID?
+}
+
 struct DashboardView: View {
     @ObservedObject var coordinator: UsageCoordinator
     @ObservedObject var settings: SettingsStore
     @ObservedObject var layoutMetrics: PopoverLayoutMetrics
     let actions: AppActions
-    @State private var draggedProvider: UUID?
-    @State private var hoveredProvider: UUID?
-    @State private var dragTranslation: CGSize = .zero
-    @State private var dragStartFrame: CGRect?
-    @State private var dragSlotFrames: [CGRect] = []
-    @State private var dragCurrentIndex: Int?
+
+    @State private var dragState: ProviderDragState?
     @State private var cardFrames: [UUID: CGRect] = [:]
 
     var body: some View {
@@ -86,7 +89,7 @@ struct DashboardView: View {
             VStack(spacing: 12) {
                 ForEach(settings.registeredProviders) { instance in
                     providerCard(instance, floating: false)
-                        .opacity(draggedProvider == instance.id ? 0.12 : 1)
+                        .opacity(dragState?.instanceID == instance.id ? 0.12 : 1)
                         .background(
                             GeometryReader { proxy in
                                 Color.clear.preference(
@@ -97,12 +100,13 @@ struct DashboardView: View {
                 }
             }
 
-            if let id = draggedProvider,
-               let instance = settings.instance(id),
-               let start = dragStartFrame {
+            if let dragState,
+               let instance = settings.instance(dragState.instanceID) {
                 providerCard(instance, floating: true)
-                    .frame(width: start.width, height: start.height)
-                    .position(x: start.midX, y: start.midY + dragTranslation.height)
+                    .frame(width: dragState.startFrame.width, height: dragState.startFrame.height)
+                    .position(
+                        x: dragState.startFrame.midX,
+                        y: dragState.startFrame.midY + dragState.translation.height)
                     .scaleEffect(1.025)
                     .shadow(color: .black.opacity(0.30), radius: 14, y: 8)
                     .zIndex(100)
@@ -127,44 +131,47 @@ struct DashboardView: View {
             metric: settings.metric,
             isSelected: settings.selectedProviderInstanceID == instance.id,
             showsReorderHandle: settings.registeredProviders.count > 1,
-            isDropTarget: hoveredProvider == instance.id,
+            isDropTarget: dragState?.dropTarget == instance.id,
             isFloating: floating,
             actions: actions,
             select: { settings.selectedProviderInstanceID = instance.id },
             dragChanged: { value in handleDragChanged(instanceID: instance.id, value: value) },
-            dragEnded: { handleDragEnded() })
+            dragEnded: handleDragEnded)
     }
 
     private func handleDragChanged(instanceID: UUID, value: DragGesture.Value) {
-        if draggedProvider == nil {
+        if dragState == nil {
             let order = settings.registeredProviders
             let slots = order.compactMap { cardFrames[$0.id] }
             guard slots.count == order.count,
                   let index = order.firstIndex(where: { $0.id == instanceID }),
                   let startFrame = cardFrames[instanceID] else { return }
-            draggedProvider = instanceID
-            dragStartFrame = startFrame
-            dragSlotFrames = slots
-            dragCurrentIndex = index
+            dragState = ProviderDragState(
+                instanceID: instanceID,
+                startFrame: startFrame,
+                slots: slots,
+                currentIndex: index)
         }
-        dragTranslation = ProviderDragLayout.verticalTranslation(value.translation)
 
-        guard let currentIndex = dragCurrentIndex,
-              let startFrame = dragStartFrame else { return }
+        guard var state = dragState else { return }
+        state.translation = ProviderDragLayout.verticalTranslation(value.translation)
         let nextIndex = ProviderDragLayout.nextIndex(
-            draggedCenterY: startFrame.midY + dragTranslation.height,
-            currentIndex: currentIndex,
-            slots: dragSlotFrames,
+            draggedCenterY: state.startFrame.midY + state.translation.height,
+            currentIndex: state.currentIndex,
+            slots: state.slots,
             hysteresis: 6)
-        guard nextIndex != currentIndex,
+
+        guard nextIndex != state.currentIndex,
               settings.registeredProviders.indices.contains(nextIndex) else {
-            hoveredProvider = nil
+            state.dropTarget = nil
+            dragState = state
             return
         }
 
         let target = settings.registeredProviders[nextIndex].id
-        hoveredProvider = target
-        dragCurrentIndex = nextIndex
+        state.currentIndex = nextIndex
+        state.dropTarget = target
+        dragState = state
         withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
             settings.moveProvider(instanceID, onto: target)
         }
@@ -172,12 +179,7 @@ struct DashboardView: View {
 
     private func handleDragEnded() {
         withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.88)) {
-            draggedProvider = nil
-            hoveredProvider = nil
-            dragTranslation = .zero
-            dragStartFrame = nil
-            dragSlotFrames = []
-            dragCurrentIndex = nil
+            dragState = nil
         }
     }
 
