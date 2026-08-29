@@ -84,9 +84,8 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         accountLabel.map { "\(provider.displayName) · \($0)" } ?? provider.displayName
     }
 
-    /// Stable default slot used by fresh installs and legacy migration. Only this
-    /// slot may reuse ambient credentials owned by an external client.
-    var isLegacyMigratedInstance: Bool {
+    /// The stable slot allowed to reuse ambient credentials owned by an external client.
+    var isDefaultSlot: Bool {
         id == Self.legacyID(for: provider)
     }
 
@@ -94,6 +93,7 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         ProviderInstance(id: id, provider: provider, accountLabel: value)
     }
 
+    /// Historical UUID values are preserved so old one-card settings migrate in place.
     static func legacyID(for provider: ProviderID) -> UUID {
         let suffix: String = switch provider {
         case .openCodeGo: "000000000001"
