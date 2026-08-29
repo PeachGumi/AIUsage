@@ -7,9 +7,9 @@ final class QwenProvider: UsageProvider {
     private let cookieSource: (URL) async throws -> String
 
     init(
-        session: URLSession = MajorProviderHTTP.session(),
-        cookieSource: ((URL) async throws -> String)? = nil
-    ) {
+        session: URLSession = QwenProvider.makeSession(),
+        cookieSource: ((URL) async throws -> String)? = nil)
+    {
         self.session = session
         if let cookieSource {
             self.cookieSource = cookieSource
@@ -20,6 +20,9 @@ final class QwenProvider: UsageProvider {
     }
 
     func fetch() async throws -> ProviderSnapshot {
+        // Per-destination headers: each request only carries cookies a browser
+        // would send to that exact host. The legacy file fallback applies to
+        // home.qwencloud.com only.
         let homeCookie = try await cookieSource(URLs.userInfo)
         let token = try await fetchSecToken(cookie: homeCookie)
         let gatewayCookie = try await cookieSource(URLs.gateway)
@@ -56,7 +59,8 @@ final class QwenProvider: UsageProvider {
         }
         guard object["code"] as? String != "ConsoleNeedLogin" else { throw QwenUsageError.notLoggedIn }
         guard let token = (object["data"] as? [String: Any])?["secToken"] as? String,
-              !token.isEmpty else { throw QwenUsageError.invalidResponse }
+              !token.isEmpty
+        else { throw QwenUsageError.invalidResponse }
         return token
     }
 
@@ -64,8 +68,8 @@ final class QwenProvider: UsageProvider {
         api: String,
         data: [String: Any],
         secToken: String,
-        cookieHeader: String
-    ) throws -> URLRequest {
+        cookieHeader: String) throws -> URLRequest
+    {
         let wrapped = try wrappedData(data, api: api)
         let json = try JSONSerialization.data(withJSONObject: wrapped)
         guard let params = String(data: json, encoding: .utf8),
@@ -96,6 +100,15 @@ final class QwenProvider: UsageProvider {
         request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         request.httpBody = bodyData
         return request
+    }
+
+    static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        return URLSession(configuration: configuration, delegate: RejectRedirectDelegate(), delegateQueue: nil)
     }
 
     private static func wrappedData(_ data: [String: Any], api: String) throws -> [String: Any] {
