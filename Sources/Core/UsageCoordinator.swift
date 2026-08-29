@@ -37,7 +37,6 @@ final class UsageCoordinator: ObservableObject {
     private let providerFactory: (ProviderInstance) -> any UsageProvider
     private var providers: [UUID: any UsageProvider] = [:]
     private var instances: [UUID: ProviderInstance] = [:]
-    private var enabledInstanceIDs: Set<UUID> = []
     private var generations: [UUID: Int] = [:]
     private var lastRefreshAllAt: Date?
     private var refreshAllInProgress = false
@@ -67,13 +66,14 @@ final class UsageCoordinator: ObservableObject {
 
     func setEnabledProviders(_ nextInstances: [ProviderInstance]) {
         let nextByID = Self.uniqueInstances(nextInstances)
+        let currentIDs = Set(instances.keys)
         let nextIDs = Set(nextByID.keys)
 
-        for id in enabledInstanceIDs.subtracting(nextIDs) {
+        for id in currentIDs.subtracting(nextIDs) {
             removeRuntime(id)
         }
 
-        for id in enabledInstanceIDs.intersection(nextIDs) {
+        for id in currentIDs.intersection(nextIDs) {
             guard let next = nextByID[id] else { continue }
             if instances[id]?.provider != next.provider {
                 replaceRuntime(id, with: next)
@@ -82,17 +82,14 @@ final class UsageCoordinator: ObservableObject {
             }
         }
 
-        for id in nextIDs.subtracting(enabledInstanceIDs) {
+        for id in nextIDs.subtracting(currentIDs) {
             guard let instance = nextByID[id] else { continue }
             installRuntime(instance)
         }
-
-        enabledInstanceIDs = nextIDs
     }
 
     func rebuildProvider(_ instanceID: UUID) {
-        guard enabledInstanceIDs.contains(instanceID),
-              let instance = instances[instanceID] else { return }
+        guard let instance = instances[instanceID] else { return }
         replaceRuntime(instanceID, with: instance)
     }
 
@@ -104,15 +101,14 @@ final class UsageCoordinator: ObservableObject {
             lastRefreshAllAt = Date()
         }
 
-        let tasks = enabledInstanceIDs.map { id in
+        let tasks = instances.keys.map { id in
             Task { @MainActor [weak self] in await self?.refresh(id) }
         }
         for task in tasks { await task.value }
     }
 
     func refresh(_ instanceID: UUID) async {
-        guard enabledInstanceIDs.contains(instanceID),
-              let provider = providers[instanceID] else { return }
+        guard let provider = providers[instanceID] else { return }
 
         let generation = beginFetch(instanceID)
         let result: Result<ProviderSnapshot, ProviderFailure>
@@ -125,7 +121,7 @@ final class UsageCoordinator: ObservableObject {
         }
 
         guard generations[instanceID] == generation,
-              enabledInstanceIDs.contains(instanceID) else { return }
+              instances[instanceID] != nil else { return }
         apply(result, to: instanceID)
         refreshing.remove(instanceID)
     }
@@ -134,14 +130,14 @@ final class UsageCoordinator: ObservableObject {
     func instance(_ instanceID: UUID) -> ProviderInstance? { instances[instanceID] }
 
     func cancelAll() {
-        for id in enabledInstanceIDs { invalidateFetch(id) }
+        for id in instances.keys { invalidateFetch(id) }
     }
 
     func markSignedOut(_ instanceID: UUID, message: String) {
         invalidateFetch(instanceID)
         snapshots.removeValue(forKey: instanceID)
         errors[instanceID] = message
-        if enabledInstanceIDs.contains(instanceID) {
+        if instances[instanceID] != nil {
             authenticationStates[instanceID] = .required
         }
     }
