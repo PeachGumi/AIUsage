@@ -365,7 +365,7 @@ final class AntigravityProvider: UsageProvider {
 
     struct Endpoint: Equatable, Sendable {
         let port: Int
-        let csrfToken: String
+        let csrfToken: String?
     }
 
     func fetch() async throws -> ProviderSnapshot {
@@ -397,15 +397,22 @@ final class AntigravityProvider: UsageProvider {
             guard let split = text.firstIndex(where: { $0.isWhitespace }),
                   let pid = Int(text[..<split]) else { continue }
             let command = String(text[split...]).trimmingCharacters(in: .whitespaces)
-            let lower = command.lowercased()
-            guard lower.contains("language_server"), lower.contains("antigravity"),
-                  let token = csrfToken(from: command) else { continue }
+            guard isSupportedProcess(command: command) else { continue }
+            let token = csrfToken(from: command)
+            if command.lowercased().contains("language_server"), token == nil { continue }
             let ports = (try? await listeningPorts(pid: pid)) ?? []
             for port in ports where !results.contains(where: { $0.port == port && $0.csrfToken == token }) {
                 results.append(Endpoint(port: port, csrfToken: token))
             }
         }
         return results
+    }
+
+    static func isSupportedProcess(command: String) -> Bool {
+        let lower = command.lowercased()
+        if lower.contains("language_server"), lower.contains("antigravity") { return true }
+        guard let executable = command.split(whereSeparator: \.isWhitespace).first else { return false }
+        return URL(fileURLWithPath: String(executable)).lastPathComponent.lowercased() == "agy"
     }
 
     static func csrfToken(from command: String) -> String? {
@@ -446,7 +453,9 @@ final class AntigravityProvider: UsageProvider {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
-        request.setValue(endpoint.csrfToken, forHTTPHeaderField: "X-Codeium-Csrf-Token")
+        if let csrfToken = endpoint.csrfToken {
+            request.setValue(csrfToken, forHTTPHeaderField: "X-Codeium-Csrf-Token")
+        }
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
@@ -461,8 +470,12 @@ final class AntigravityProvider: UsageProvider {
     }
 
     static func parseQuotaSummary(data: Data, now: Date = Date()) throws -> ProviderSnapshot {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let groups = root["groups"] as? [[String: Any]] else {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw MajorProviderError.invalidResponse(
+                "Antigravity returned unexpected quota-summary data.")
+        }
+        let payload = (root["response"] as? [String: Any]) ?? root
+        guard let groups = payload["groups"] as? [[String: Any]] else {
             throw MajorProviderError.invalidResponse(
                 "Antigravity returned unexpected quota-summary data.")
         }
@@ -480,7 +493,7 @@ final class AntigravityProvider: UsageProvider {
                 let bucketName = (bucket["displayName"] as? String ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 guard let cadence = quotaCadence(bucketID + " " + bucketName),
-                      let remaining = remainingFraction(bucket["remaining"]),
+                      let remaining = remainingFraction(bucket["remaining"] ?? bucket["remainingFraction"]),
                       remaining.isFinite,
                       (0...1).contains(remaining) else { continue }
 
@@ -528,6 +541,7 @@ final class AntigravityProvider: UsageProvider {
     }
 
     private static func remainingFraction(_ raw: Any?) -> Double? {
+        if let value = number(raw) { return value }
         guard let object = raw as? [String: Any] else { return nil }
         if let value = number(object["remainingFraction"]) { return value }
         if object["case"] as? String == "remainingFraction" { return number(object["value"]) }

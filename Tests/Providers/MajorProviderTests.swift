@@ -87,6 +87,25 @@ final class MajorProviderTests: XCTestCase {
         XCTAssertThrowsError(try AntigravityProvider.parseQuotaSummary(data: data))
     }
 
+    func testAntigravityParsesCLIWrappedQuotaSummary() throws {
+        let data = Data(#"""
+        {"response":{"groups":[{"displayName":"Gemini Models","buckets":[
+          {"bucketId":"gemini-5h","displayName":"5-hour Limit","remainingFraction":0.75}
+        ]}]}}
+        """#.utf8)
+
+        let snapshot = try AntigravityProvider.parseQuotaSummary(data: data)
+        XCTAssertEqual(snapshot.windows.first?.remainingPercent, 75)
+    }
+
+    func testAntigravityRecognizesCLIProcess() {
+        XCTAssertTrue(AntigravityProvider.isSupportedProcess(command: "agy"))
+        XCTAssertTrue(AntigravityProvider.isSupportedProcess(command: "/Users/test/.local/bin/agy"))
+        XCTAssertTrue(AntigravityProvider.isSupportedProcess(
+            command: "/Applications/Antigravity.app/language_server --csrf_token token"))
+        XCTAssertFalse(AntigravityProvider.isSupportedProcess(command: "some-other-process"))
+    }
+
     func testAntigravityCSRFTokenParsingSupportsBothArgumentForms() {
         XCTAssertEqual(AntigravityProvider.csrfToken(from: "/app/language_server --csrf_token abc123 --other"), "abc123")
         XCTAssertEqual(AntigravityProvider.csrfToken(from: "/app/language_server --csrf_token=xyz789"), "xyz789")
