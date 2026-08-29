@@ -35,8 +35,8 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         accountLabel: String? = nil,
         startURL: URL,
         dataStore: WKWebsiteDataStore = .default(),
-        onSuccess: @escaping (URL) -> Void)
-    {
+        onSuccess: @escaping (URL) -> Void
+    ) {
         self.provider = provider
         self.accountLabel = accountLabel
         self.startURL = startURL
@@ -46,8 +46,7 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         if let window {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            present(window)
             return
         }
 
@@ -55,44 +54,54 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
 
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
-        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 980, height: 760), configuration: configuration)
+        let webView = WKWebView(
+            frame: NSRect(x: 0, y: 0, width: 980, height: 760),
+            configuration: configuration)
         webView.navigationDelegate = self
+
         let window = NSWindow(
             contentRect: webView.frame,
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false)
-        let suffix = accountLabel.map { " — \($0)" } ?? ""
-        window.title = "Sign in to \(provider.displayName)\(suffix)"
+        window.title = "Sign in to \(provider.displayName)\(accountLabel.map { " — \($0)" } ?? "")"
         window.contentView = webView
         window.delegate = self
         window.center()
+
         self.webView = webView
         self.window = window
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        present(window)
         webView.load(URLRequest(url: startURL))
     }
 
     func close() {
-        cancelPendingSuccess()
-        webView?.stopLoading()
-        window?.orderOut(nil)
-        window = nil
-        webView = nil
+        tearDown(orderOut: true)
+    }
+
+    private func present(_ window: NSWindow) {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func navigationPolicy(for url: URL) -> WKNavigationActionPolicy {
         guard url.scheme == "https" else { return .cancel }
+        let allowedHosts: Set<String>
         switch provider {
         case .openCodeGo:
-            return ["opencode.ai", "auth.opencode.ai"].contains(url.host) ? .allow : .cancel
+            allowedHosts = ["opencode.ai", "auth.opencode.ai"]
         case .qwen:
-            return ["home.qwencloud.com", "cs-data.qwencloud.com", "passport.qwencloud.com",
-                    "qwencloud.com", "qianwenai.com"].contains(url.host) ? .allow : .cancel
+            allowedHosts = [
+                "home.qwencloud.com",
+                "cs-data.qwencloud.com",
+                "passport.qwencloud.com",
+                "qwencloud.com",
+                "qianwenai.com",
+            ]
         case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
             return .cancel
         }
+        return url.host.map(allowedHosts.contains) == true ? .allow : .cancel
     }
 
     private func handlePossibleSuccess(url: URL) {
@@ -111,6 +120,14 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func tearDown(orderOut: Bool) {
+        cancelPendingSuccess()
+        webView?.stopLoading()
+        if orderOut { window?.orderOut(nil) }
+        window = nil
+        webView = nil
+    }
+
     private func cancelPendingSuccess() {
         successTask?.cancel()
         successTask = nil
@@ -122,9 +139,12 @@ extension WebLoginWindowController: WKNavigationDelegate {
     public func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void)
-    {
-        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
         decisionHandler(navigationPolicy(for: url))
     }
 
@@ -134,9 +154,6 @@ extension WebLoginWindowController: WKNavigationDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        cancelPendingSuccess()
-        webView?.stopLoading()
-        window = nil
-        webView = nil
+        tearDown(orderOut: false)
     }
 }
