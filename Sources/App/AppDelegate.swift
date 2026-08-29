@@ -71,6 +71,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func removeProvider(_ instanceID: UUID) {
         guard let instance = settings.instance(instanceID) else { return }
 
+        // Do not remove the card if its AIUsage-owned Keychain item cannot be
+        // deleted. Otherwise the UI would claim removal succeeded while leaving
+        // an orphaned credential behind.
+        do {
+            try ProviderInstanceAccountStore.deleteSecret(for: instance)
+        } catch {
+            showError(title: "Could not remove account credential", error: error)
+            return
+        }
+
         loginControllers[instanceID]?.close()
         loginControllers.removeValue(forKey: instanceID)
 
@@ -100,7 +110,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Remove only data that belongs to this AIUsage card. External client
         // credentials and shared legacy WebKit profiles are intentionally left
         // untouched.
-        try? ProviderInstanceAccountStore.deleteSecret(for: instance)
         ProviderInstanceAccountStore.clearCredentialPath(for: instanceID)
 
         settings.removeProvider(instanceID)
@@ -293,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 instance,
                 title: "Choose this Claude account's credentials file",
                 message: instance.isLegacyMigratedInstance
-                    ? "Choose a Claude Code credentials file for this card, or use the normal Claude profile. AIUsage reads it in place and never modifies it."
+                    ? "Choose a Claude Code credentials file for this card, or use the normal Claude profile. AIUsage reads the file in place and never modifies it."
                     : "This duplicate card requires a separate Claude Code credentials file. AIUsage reads it in place and never modifies it.")
         case .antigravity:
             showAntigravityAccountInfo()
@@ -456,9 +465,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             coordinator.markSignedOut(instanceID, message: "OpenCode login is required.")
         case .zai:
-            try? ProviderInstanceAccountStore.deleteSecret(for: instance)
-            if instance.isLegacyMigratedInstance {
-                try? AIUsageSecretStore.delete(account: ZAIProvider.keychainAccount)
+            do {
+                try ProviderInstanceAccountStore.deleteSecret(for: instance)
+                if instance.isLegacyMigratedInstance {
+                    try AIUsageSecretStore.delete(account: ZAIProvider.keychainAccount)
+                }
+            } catch {
+                showError(title: "Could not sign out of Z.AI", error: error)
+                return
             }
             coordinator.rebuildProvider(instanceID)
             coordinator.markSignedOut(instanceID, message: "Z.AI API key is required.")
