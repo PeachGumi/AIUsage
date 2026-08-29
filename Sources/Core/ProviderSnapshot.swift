@@ -1,5 +1,11 @@
 import Foundation
 
+enum ProviderAccountAction: Sendable {
+    case signInOut
+    case apiKey
+    case account
+}
+
 enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
     case openCodeGo
     case codex
@@ -51,11 +57,16 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         self != .antigravity
     }
 
-    var managesAuthentication: Bool {
+    var accountAction: ProviderAccountAction {
         switch self {
-        case .openCodeGo, .qwen, .zai: true
-        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi: false
+        case .openCodeGo, .qwen: .signInOut
+        case .zai: .apiKey
+        case .codex, .claude, .antigravity, .copilot, .cursor, .kimi: .account
         }
+    }
+
+    var managesAuthentication: Bool {
+        accountAction == .signInOut
     }
 
     var staticDashboardURL: URL? {
