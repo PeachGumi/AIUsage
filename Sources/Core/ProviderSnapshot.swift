@@ -2,8 +2,8 @@ import Foundation
 
 enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
     case openCodeGo
-    case qwen
     case codex
+    case qwen
     case claude
     case antigravity
     case copilot
@@ -13,17 +13,7 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    static let implemented: [ProviderID] = [
-        .openCodeGo,
-        .codex,
-        .qwen,
-        .claude,
-        .antigravity,
-        .copilot,
-        .cursor,
-        .zai,
-        .kimi,
-    ]
+    static let implemented: [ProviderID] = allCases
 
     var displayName: String {
         switch self {
