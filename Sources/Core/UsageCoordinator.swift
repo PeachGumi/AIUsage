@@ -22,7 +22,7 @@ enum ProviderAuthenticationState: Equatable, Sendable {
     case required
 }
 
-struct ProviderFailure: Error, Equatable, Sendable {
+private struct ProviderFailure: Error, Equatable, Sendable {
     let message: String
     let requiresAuthentication: Bool
 }
@@ -47,21 +47,6 @@ final class UsageCoordinator: ObservableObject {
     ) {
         self.providerFactory = providerFactory
         setEnabledProviders(instances)
-    }
-
-    convenience init(providers: [any UsageProvider], enabledProviders: [ProviderID]? = nil) {
-        let allowed = enabledProviders.map(Set.init)
-        let pairs = providers.compactMap { provider -> (ProviderInstance, any UsageProvider)? in
-            guard allowed?.contains(provider.id) != false else { return nil }
-            return (ProviderInstance(provider: provider.id), provider)
-        }
-        let runtimes = Dictionary(uniqueKeysWithValues: pairs.map { ($0.0.id, $0.1) })
-        self.init(instances: pairs.map(\.0)) { instance in
-            guard let runtime = runtimes[instance.id] else {
-                preconditionFailure("Missing test provider runtime for \(instance.id)")
-            }
-            return runtime
-        }
     }
 
     func setEnabledProviders(_ nextInstances: [ProviderInstance]) {
@@ -126,7 +111,6 @@ final class UsageCoordinator: ObservableObject {
         refreshing.remove(instanceID)
     }
 
-    func provider(_ instanceID: UUID) -> (any UsageProvider)? { providers[instanceID] }
     func instance(_ instanceID: UUID) -> ProviderInstance? { instances[instanceID] }
 
     func cancelAll() {
