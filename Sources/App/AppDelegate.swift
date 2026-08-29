@@ -81,9 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .qwen:
                 let dataStore = qwenRepository?.dataStore ?? websiteDataStore(for: instance)
                 Task { [weak self] in
-                    await self?.removeWebsiteData(
-                        matching: ["qwencloud.com", "qianwenai.com"],
-                        dataStore: dataStore)
+                    await self?.removeAllWebsiteData(dataStore: dataStore)
                 }
             case .openCodeGo:
                 let store = openCodeStore ?? OpenCodeWorkspaceStore(
@@ -92,9 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 store.clear()
                 let dataStore = websiteDataStore(for: instance)
                 Task { [weak self] in
-                    await self?.removeWebsiteData(
-                        matching: ["opencode.ai"],
-                        dataStore: dataStore)
+                    await self?.removeAllWebsiteData(dataStore: dataStore)
                 }
             case .codex, .claude, .antigravity, .copilot, .cursor, .zai, .kimi:
                 break
@@ -297,7 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 instance,
                 title: "Choose this Claude account's credentials file",
                 message: instance.isLegacyMigratedInstance
-                    ? "Choose a Claude Code credentials file for this card, or use the normal Claude profile. AIUsage reads the file in place and never modifies it."
+                    ? "Choose a Claude Code credentials file for this card, or use the normal Claude profile. AIUsage reads it in place and never modifies it."
                     : "This duplicate card requires a separate Claude Code credentials file. AIUsage reads it in place and never modifies it.")
         case .antigravity:
             showAntigravityAccountInfo()
@@ -440,15 +436,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .qwen:
             let repository = qwenRepository(for: instance)
             await repository.logout()
-            await removeWebsiteData(
-                matching: ["qwencloud.com", "qianwenai.com"],
-                dataStore: repository.dataStore)
+            if instance.isLegacyMigratedInstance {
+                await removeWebsiteData(
+                    matching: ["qwencloud.com", "qianwenai.com"],
+                    dataStore: repository.dataStore)
+            } else {
+                await removeAllWebsiteData(dataStore: repository.dataStore)
+            }
             coordinator.markSignedOut(instanceID, message: "Qwen Cloud login is required.")
         case .openCodeGo:
             openCodeStore(for: instance).clear()
-            await removeWebsiteData(
-                matching: ["opencode.ai"],
-                dataStore: websiteDataStore(for: instance))
+            let dataStore = websiteDataStore(for: instance)
+            if instance.isLegacyMigratedInstance {
+                await removeWebsiteData(
+                    matching: ["opencode.ai"],
+                    dataStore: dataStore)
+            } else {
+                await removeAllWebsiteData(dataStore: dataStore)
+            }
             coordinator.markSignedOut(instanceID, message: "OpenCode login is required.")
         case .zai:
             try? ProviderInstanceAccountStore.deleteSecret(for: instance)
@@ -522,6 +527,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         await withCheckedContinuation { continuation in
             dataStore.removeData(ofTypes: types, for: matched) { continuation.resume() }
+        }
+    }
+
+    /// Dedicated account stores are not shared with any other card, so cleanup
+    /// should remove every WebKit artifact rather than only known provider hosts.
+    /// This also clears cookies/cache left by login redirects or identity providers.
+    private func removeAllWebsiteData(dataStore: WKWebsiteDataStore) async {
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        await withCheckedContinuation { continuation in
+            dataStore.removeData(
+                ofTypes: types,
+                modifiedSince: Date.distantPast) { continuation.resume() }
         }
     }
 
