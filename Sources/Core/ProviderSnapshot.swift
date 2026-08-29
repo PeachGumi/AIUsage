@@ -19,7 +19,20 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    static let implemented: [ProviderID] = allCases
+    /// Providers exposed in the Add Provider UI. Keep this list explicit so a
+    /// work-in-progress enum case cannot become user-visible before its release
+    /// checks, credential boundary and failure behavior are ready.
+    static let implemented: [ProviderID] = [
+        .openCodeGo,
+        .codex,
+        .qwen,
+        .claude,
+        .antigravity,
+        .copilot,
+        .cursor,
+        .zai,
+        .kimi,
+    ]
 
     var displayName: String {
         switch self {
