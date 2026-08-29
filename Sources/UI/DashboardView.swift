@@ -411,9 +411,12 @@ private struct ProviderCard: View {
 
     @ViewBuilder
     private var authenticationAction: some View {
-        if provider == .zai {
+        switch provider.accountAction {
+        case .apiKey:
             Button("API key…") { actions.login(instance.id) }.buttonStyle(.link)
-        } else if provider.managesAuthentication {
+        case .account:
+            Button("Account…") { actions.login(instance.id) }.buttonStyle(.link)
+        case .signInOut:
             switch authenticationState {
             case .authenticated:
                 Button("Sign out") { actions.logout(instance.id) }.buttonStyle(.link)
@@ -424,8 +427,6 @@ private struct ProviderCard: View {
                     snapshot != nil ? actions.logout(instance.id) : actions.login(instance.id)
                 }.buttonStyle(.link)
             }
-        } else {
-            Button("Account…") { actions.login(instance.id) }.buttonStyle(.link)
         }
     }
 
