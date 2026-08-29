@@ -1,4 +1,5 @@
 import XCTest
+import Foundation
 @testable import AIUsage
 
 @MainActor
@@ -211,6 +212,59 @@ final class SettingsStoreTests: XCTestCase {
 
             let store = SettingsStore(defaults: defaults)
             XCTAssertTrue(store.registeredProviders.isEmpty)
+        }
+    }
+
+    func testLossyNewFormatKeepsValidInstancesWhenOneEntryIsInvalid() throws {
+        try withDefaultsThrowing { defaults in
+            let validID = UUID()
+            let invalidID = UUID()
+            let malformedID = UUID()
+            let records: [[String: Any]] = [
+                [
+                    "id": validID.uuidString,
+                    "provider": "codex",
+                    "accountLabel": "Work",
+                ],
+                [
+                    "id": invalidID.uuidString,
+                    "provider": "futureProvider",
+                    "accountLabel": "Unknown",
+                ],
+                [
+                    "id": malformedID.uuidString,
+                    "provider": "qwen",
+                    "accountLabel": 42,
+                ],
+            ]
+            defaults.set(
+                try JSONSerialization.data(withJSONObject: records),
+                forKey: "providerInstances.v1")
+            defaults.set(["qwen"], forKey: "registeredProviders")
+
+            let store = SettingsStore(defaults: defaults)
+
+            XCTAssertEqual(store.registeredProviders.map(\.id), [validID])
+            XCTAssertEqual(store.instance(validID)?.accountLabel, "Work")
+        }
+    }
+
+    func testDecodedAccountLabelsUseTheSameNormalizationAsNewInstances() throws {
+        try withDefaultsThrowing { defaults in
+            let id = UUID()
+            let rawLabel = "  \(String(repeating: "x", count: 90))  "
+            let record: [[String: Any]] = [[
+                "id": id.uuidString,
+                "provider": "codex",
+                "accountLabel": rawLabel,
+            ]]
+            defaults.set(
+                try JSONSerialization.data(withJSONObject: record),
+                forKey: "providerInstances.v1")
+
+            let store = SettingsStore(defaults: defaults)
+
+            XCTAssertEqual(store.instance(id)?.accountLabel, String(repeating: "x", count: 80))
         }
     }
 

@@ -1,35 +1,15 @@
 #!/usr/bin/env python3
-"""Generate the original AIUsage macOS app icon."""
+"""Build the AIUsage macOS icon from the checked-in master artwork."""
+
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+import subprocess
+
 
 ROOT = Path(__file__).resolve().parents[1]
-ICONSET = ROOT / "Resources" / "AppIcon.iconset"
-ICONSET.mkdir(parents=True, exist_ok=True)
-SIZE = 1024
-image = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-pixels = image.load()
-for y in range(SIZE):
-    for x in range(SIZE):
-        t = (x + y) / (2 * SIZE)
-        pixels[x, y] = (int(18 + 28 * t), int(24 + 26 * t), int(48 + 45 * t), 255)
+SOURCE = ROOT / "docs" / "icon.png"
+APPICONSET = ROOT / "Resources" / "Assets.xcassets" / "AppIcon.appiconset"
 
-draw = ImageDraw.Draw(image)
-draw.rounded_rectangle((45, 45, 979, 979), radius=220, outline=(255, 255, 255, 28), width=8)
-colors = [(25, 196, 196), (129, 87, 224), (84, 104, 232)]
-for index, color in enumerate(colors):
-    radius = 315 - index * 82
-    box = (512 - radius, 512 - radius, 512 + radius, 512 + radius)
-    draw.arc(box, 205, 505, fill=(*color, 255), width=46)
-try:
-    font = ImageFont.truetype("/System/Library/Fonts/SFNSRounded.ttf", 230)
-except OSError:
-    font = ImageFont.truetype("/System/Library/Fonts/SFNS.ttf", 230)
-text = "AI"
-box = draw.textbbox((0, 0), text, font=font)
-draw.text(((SIZE - (box[2] - box[0])) / 2, (SIZE - (box[3] - box[1])) / 2 - 18), text, font=font, fill=(245, 247, 255, 255))
-
-sizes = {
+SIZES = {
     "icon_16x16.png": 16,
     "icon_16x16@2x.png": 32,
     "icon_32x32.png": 32,
@@ -41,6 +21,30 @@ sizes = {
     "icon_512x512.png": 512,
     "icon_512x512@2x.png": 1024,
 }
-for name, size in sizes.items():
-    image.resize((size, size), Image.Resampling.LANCZOS).save(ICONSET / name)
-print(ICONSET)
+
+
+def run(*arguments: str) -> None:
+    subprocess.run(arguments, check=True, stdout=subprocess.DEVNULL)
+
+
+def main() -> None:
+    if not SOURCE.is_file():
+        raise SystemExit(f"Icon master not found: {SOURCE}")
+
+    APPICONSET.mkdir(parents=True, exist_ok=True)
+    for name, size in SIZES.items():
+        run(
+            "/usr/bin/sips",
+            "-z",
+            str(size),
+            str(size),
+            str(SOURCE),
+            "--out",
+            str(APPICONSET / name),
+        )
+
+    print(APPICONSET)
+
+
+if __name__ == "__main__":
+    main()

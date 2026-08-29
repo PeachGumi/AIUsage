@@ -87,23 +87,51 @@ final class UsageCoordinator: ObservableObject {
             lastRefreshAllAt = Date()
         }
 
-        let tasks = instances.keys.map { id in
-            Task { @MainActor [weak self] in await self?.refresh(id) }
+        await withTaskGroup(of: Void.self) { group in
+            for id in instances.keys {
+                group.addTask { [weak self] in
+                    await self?.refresh(id)
+                }
+            }
+            await group.waitForAll()
         }
-        for task in tasks { await task.value }
     }
 
     func refresh(_ instanceID: UUID) async {
-        guard let provider = providers[instanceID] else { return }
+        guard let provider = providers[instanceID],
+              let instance = instances[instanceID],
+              !Task.isCancelled else { return }
 
         let generation = beginFetch(instanceID)
         let result: Result<ProviderSnapshot, ProviderFailure>
-        do {
-            result = .success(try await provider.fetch())
-        } catch is CancellationError {
-            result = .failure(ProviderFailure(message: "Cancelled", requiresAuthentication: false))
-        } catch {
-            result = .failure(Self.failure(from: error))
+        if provider.id != instance.provider {
+            result = .failure(Self.invalidProviderFailure)
+        } else {
+            do {
+                let snapshot = try await provider.fetch()
+                guard !Task.isCancelled else {
+                    finishCancelledFetch(instanceID, generation: generation)
+                    return
+                }
+                if let failure = Self.validationFailure(
+                    for: snapshot,
+                    expectedProvider: instance.provider)
+                {
+                    result = .failure(failure)
+                } else {
+                    result = .success(snapshot)
+                }
+            } catch is CancellationError {
+                finishCancelledFetch(instanceID, generation: generation)
+                return
+            } catch {
+                result = .failure(Self.failure(from: error))
+            }
+        }
+
+        guard !Task.isCancelled else {
+            finishCancelledFetch(instanceID, generation: generation)
+            return
         }
 
         guard generations[instanceID] == generation,
@@ -119,12 +147,11 @@ final class UsageCoordinator: ObservableObject {
     }
 
     func markSignedOut(_ instanceID: UUID, message: String) {
+        guard instances[instanceID] != nil else { return }
         invalidateFetch(instanceID)
         snapshots.removeValue(forKey: instanceID)
         errors[instanceID] = message
-        if instances[instanceID] != nil {
-            authenticationStates[instanceID] = .required
-        }
+        authenticationStates[instanceID] = .required
     }
 
     func refreshIfStale(olderThan interval: TimeInterval) async {
@@ -165,6 +192,11 @@ final class UsageCoordinator: ObservableObject {
         return generation
     }
 
+    private func finishCancelledFetch(_ id: UUID, generation: UInt64) {
+        guard generations[id] == generation, instances[id] != nil else { return }
+        refreshing.remove(id)
+    }
+
     @discardableResult
     private func invalidateFetch(_ id: UUID) -> UInt64 {
         generationCounter &+= 1
@@ -195,6 +227,25 @@ final class UsageCoordinator: ObservableObject {
         ProviderFailure(
             message: error.localizedDescription,
             requiresAuthentication: (error as? any ProviderAuthenticationError)?.requiresAuthentication == true)
+    }
+
+    private static let invalidProviderFailure = ProviderFailure(
+        message: "Provider returned usage data for the wrong account type.",
+        requiresAuthentication: false)
+
+    private static func validationFailure(
+        for snapshot: ProviderSnapshot,
+        expectedProvider: ProviderID
+    ) -> ProviderFailure? {
+        guard snapshot.provider == expectedProvider else {
+            return invalidProviderFailure
+        }
+        guard Set(snapshot.windows.map(\.id)).count == snapshot.windows.count else {
+            return ProviderFailure(
+                message: "Provider returned duplicate usage windows.",
+                requiresAuthentication: false)
+        }
+        return nil
     }
 
     private static func uniqueInstances(_ values: [ProviderInstance]) -> [UUID: ProviderInstance] {

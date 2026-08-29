@@ -104,6 +104,14 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
         self.accountLabel = Self.cleanedLabel(accountLabel)
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            provider: try container.decode(ProviderID.self, forKey: .provider),
+            accountLabel: try container.decodeIfPresent(String.self, forKey: .accountLabel))
+    }
+
     var title: String {
         accountLabel.map { "\(provider.displayName) · \($0)" } ?? provider.displayName
     }
@@ -139,6 +147,12 @@ struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {
     private static func cleanedLabel(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case provider
+        case accountLabel
     }
 }
 

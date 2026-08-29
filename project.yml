@@ -21,10 +21,11 @@ targets:
     info:
       path: Info.plist
       properties:
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
         NSHighResolutionCapable: true
-        CFBundleIconFile: AppIcon
         NSHumanReadableCopyright: "Copyright © 2026 AIUsage contributors. MIT License."
         NSPrincipalClass: NSApplication
     frameworks:

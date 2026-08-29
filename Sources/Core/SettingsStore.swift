@@ -129,7 +129,19 @@ final class SettingsStore: ObservableObject {
 
     private static func loadInstances(defaults: UserDefaults) -> [ProviderInstance]? {
         guard let data = defaults.data(forKey: Keys.providerInstances) else { return nil }
-        return (try? JSONDecoder().decode([ProviderInstance].self, from: data)) ?? []
+        guard let values = try? JSONDecoder().decode(
+            [LossyDecoded<ProviderInstance>].self,
+            from: data)
+        else { return [] }
+        return values.compactMap(\.value)
+    }
+
+    private struct LossyDecoded<Value: Decodable>: Decodable {
+        let value: Value?
+
+        init(from decoder: Decoder) {
+            value = try? Value(from: decoder)
+        }
     }
 
     private static func migratedInstances(defaults: UserDefaults) -> [ProviderInstance]? {

@@ -117,6 +117,77 @@ final class UsageCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.authenticationStates[second.id], .authenticated)
     }
 
+    func testUnknownInstanceCannotCreateSignedOutState() async {
+        let instance = ProviderInstance(provider: .codex)
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in
+            CountingProvider(id: .codex, used: 10)
+        }
+
+        coordinator.markSignedOut(UUID(), message: "Sign in required")
+
+        XCTAssertTrue(coordinator.errors.isEmpty)
+        XCTAssertTrue(coordinator.snapshots.isEmpty)
+        XCTAssertTrue(coordinator.authenticationStates[instance.id] == .unknown)
+    }
+
+    func testRuntimeProviderIDMismatchIsNonAuthenticationFailure() async {
+        let instance = ProviderInstance(provider: .codex)
+        let runtime = CountingProvider(id: .qwen, used: 44)
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in runtime }
+
+        await coordinator.refresh(instance.id)
+
+        XCTAssertEqual(runtime.fetchCount, 0)
+        XCTAssertNil(coordinator.snapshots[instance.id])
+        XCTAssertNotNil(coordinator.errors[instance.id])
+        XCTAssertEqual(coordinator.authenticationStates[instance.id], .unknown)
+        XCTAssertFalse(coordinator.refreshing.contains(instance.id))
+    }
+
+    func testMismatchedSnapshotProviderRetainsLastGoodSnapshot() async throws {
+        let instance = ProviderInstance(provider: .codex)
+        let initial = try snapshot(provider: .codex, used: 10)
+        let wrongProvider = try snapshot(provider: .qwen, used: 90)
+        let runtime = SequencedProvider(
+            id: .codex,
+            results: [.success(initial), .success(wrongProvider)])
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in runtime }
+
+        await coordinator.refresh(instance.id)
+        await coordinator.refresh(instance.id)
+
+        XCTAssertEqual(coordinator.snapshots[instance.id], initial)
+        XCTAssertNotNil(coordinator.errors[instance.id])
+        XCTAssertEqual(coordinator.authenticationStates[instance.id], .authenticated)
+        XCTAssertFalse(coordinator.refreshing.contains(instance.id))
+    }
+
+    func testDuplicateUsageWindowIDsAreRejectedAndLastGoodSnapshotRetained() async throws {
+        let instance = ProviderInstance(provider: .codex)
+        let initial = try snapshot(provider: .codex, used: 10)
+        let duplicateWindows = [
+            try UsageWindow(id: "same", kind: .fiveHour, label: "5-hour", usedPercent: 20, resetsAt: nil, resetDescription: nil),
+            try UsageWindow(id: "same", kind: .weekly, label: "Weekly", usedPercent: 30, resetsAt: nil, resetDescription: nil),
+        ]
+        let wrongSnapshot = ProviderSnapshot(
+            provider: .codex,
+            planName: nil,
+            windows: duplicateWindows,
+            fetchedAt: Date())
+        let runtime = SequencedProvider(
+            id: .codex,
+            results: [.success(initial), .success(wrongSnapshot)])
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in runtime }
+
+        await coordinator.refresh(instance.id)
+        await coordinator.refresh(instance.id)
+
+        XCTAssertEqual(coordinator.snapshots[instance.id], initial)
+        XCTAssertEqual(coordinator.authenticationStates[instance.id], .authenticated)
+        XCTAssertNotNil(coordinator.errors[instance.id])
+        XCTAssertFalse(coordinator.refreshing.contains(instance.id))
+    }
+
     func testCoordinatorIgnoresDuplicateInstanceIdentityInsteadOfTrapping() async {
         let id = UUID()
         let first = ProviderInstance(id: id, provider: .codex, accountLabel: "First")
@@ -220,6 +291,23 @@ final class UsageCoordinatorTests: XCTestCase {
 
         runtime.releaseGate()
         await firstRefresh.value
+    }
+
+    func testRefreshAllPropagatesParentCancellation() async {
+        let instance = ProviderInstance(provider: .codex)
+        let runtime = CancellationAwareProvider(id: .codex)
+        let coordinator = UsageCoordinator(instances: [instance]) { _ in runtime }
+
+        let refresh = Task { @MainActor in await coordinator.refreshAll() }
+        await yieldUntil { runtime.hasEntered }
+
+        refresh.cancel()
+        runtime.releaseGate()
+        await refresh.value
+
+        XCTAssertTrue(runtime.cancellationObserved)
+        XCTAssertTrue(coordinator.errors.isEmpty)
+        XCTAssertTrue(coordinator.refreshing.isEmpty)
     }
 
     func testSignedOutAccountCannotBeRestoredByOlderInflightRefresh() async {
@@ -353,6 +441,40 @@ private final class GatedProvider: UsageProvider {
                 resetsAt: nil,
                 resetDescription: nil)],
             fetchedAt: Date())
+    }
+
+    func releaseGate() {
+        enteredContinuation?.resume()
+        enteredContinuation = nil
+    }
+}
+
+@MainActor
+private final class CancellationAwareProvider: UsageProvider {
+    let id: ProviderID
+    private(set) var hasEntered = false
+    private(set) var cancellationObserved = false
+    private var enteredContinuation: CheckedContinuation<Void, Never>?
+
+    init(id: ProviderID) { self.id = id }
+
+    func fetch() async throws -> ProviderSnapshot {
+        hasEntered = true
+        return try await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                enteredContinuation = continuation
+            }
+            if Task.isCancelled {
+                cancellationObserved = true
+                throw CancellationError()
+            }
+            return ProviderSnapshot(provider: id, planName: nil, windows: [], fetchedAt: Date())
+        }, onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancellationObserved = true
+                self?.releaseGate()
+            }
+        })
     }
 
     func releaseGate() {
