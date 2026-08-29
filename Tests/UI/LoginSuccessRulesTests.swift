@@ -74,4 +74,11 @@ final class LoginSuccessRulesTests: XCTestCase {
                 screenHeight: 1080),
             778)
     }
+
+    func testPopoverAnchorsToStableRightEdgeOfStatusItem() {
+        XCTAssertEqual(
+            StatusItemController.popoverAnchorRect(
+                buttonBounds: CGRect(x: 0, y: 0, width: 120, height: 22)),
+            CGRect(x: 119, y: 0, width: 1, height: 22))
+    }
 }

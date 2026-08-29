@@ -87,7 +87,10 @@ final class StatusItemController: NSObject {
             return
         }
         updatePopoverSize()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.show(
+            relativeTo: Self.popoverAnchorRect(buttonBounds: button.bounds),
+            of: button,
+            preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         Task { @MainActor [weak self] in
             await self?.coordinator.refreshIfStale(olderThan: 60)
@@ -120,6 +123,14 @@ final class StatusItemController: NSObject {
             : CGFloat(providerCount) * fallbackCardHeight
         let naturalHeight = chromeHeight + providerListHeight
         return min(max(320, naturalHeight), safeScreenHeight)
+    }
+
+    nonisolated static func popoverAnchorRect(buttonBounds: CGRect) -> CGRect {
+        CGRect(
+            x: buttonBounds.maxX - 1,
+            y: buttonBounds.minY,
+            width: 1,
+            height: buttonBounds.height)
     }
 
     private func render() {
