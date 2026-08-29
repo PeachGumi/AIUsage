@@ -146,6 +146,9 @@ Antigravityの2アカウント目は現時点では追加できません。将�
 
 Experimental統合は未知のレスポンス形状を0%として推測せず、エラーとしてfail closedします。
 
+> [!NOTE]
+> **Experimental Providerの実アカウント検証・修正に協力してくださる方を募集しています。** Qwen Cloud、Claude、Antigravity、GitHub Copilot、Cursor、Z.AI、Kimi Codeを利用している方から、公式dashboardとの照合結果をもとにしたfixture / parser / integration修正のPull Requestを歓迎します。OAuth token、API key、Cookie、account ID、workspace ID、認証済みAPIレスポンス全文などの秘密情報はIssueやPull Requestへ含めないでください。
+
 ## 表示と更新
 
 - メニューバーには選択中の1カードを表示します。
