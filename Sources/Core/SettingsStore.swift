@@ -4,13 +4,7 @@ import Foundation
 @MainActor
 final class SettingsStore: ObservableObject {
     @Published var selectedProviderInstanceID: UUID? {
-        didSet {
-            if let selectedProviderInstanceID {
-                defaults.set(selectedProviderInstanceID.uuidString, forKey: Keys.selectedInstanceID)
-            } else {
-                defaults.removeObject(forKey: Keys.selectedInstanceID)
-            }
-        }
+        didSet { persistSelection() }
     }
 
     @Published var metric: UsageMetric {
@@ -26,92 +20,41 @@ final class SettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
 
-        let storedInstances = Self.loadInstances(defaults: defaults)
-        let migratedInstances: [ProviderInstance]?
-        if storedInstances == nil {
-            migratedInstances = Self.legacyProviderIDs(from: defaults)?.map {
-                ProviderInstance(id: ProviderInstance.legacyID(for: $0), provider: $0)
-            }
-        } else {
-            migratedInstances = nil
-        }
-
-        registeredProviders = Self.sanitized(storedInstances ?? migratedInstances ?? [])
+        let stored = Self.loadInstances(defaults: defaults)
+        let migrated = stored == nil ? Self.migratedInstances(defaults: defaults) : nil
+        registeredProviders = Self.sanitized(stored ?? migrated ?? [])
         metric = UsageMetric(rawValue: defaults.string(forKey: Keys.metric) ?? "") ?? .remaining
+        selectedProviderInstanceID = Self.initialSelection(
+            defaults: defaults,
+            instances: registeredProviders)
 
-        if let rawID = defaults.string(forKey: Keys.selectedInstanceID),
-           let savedID = UUID(uuidString: rawID),
-           registeredProviders.contains(where: { $0.id == savedID }) {
-            selectedProviderInstanceID = savedID
-        } else if let legacySelected = ProviderID(rawValue: defaults.string(forKey: Keys.legacySelectedProvider) ?? ""),
-                  let match = registeredProviders.first(where: { $0.provider == legacySelected }) {
-            selectedProviderInstanceID = match.id
-        } else {
-            selectedProviderInstanceID = registeredProviders.first?.id
-        }
-
-        if storedInstances == nil, migratedInstances != nil {
+        if stored == nil, migrated != nil {
             persistInstances()
-            if let selectedProviderInstanceID {
-                defaults.set(selectedProviderInstanceID.uuidString, forKey: Keys.selectedInstanceID)
-            }
+            persistSelection()
         }
     }
 
-    /// Most provider integrations support a stable default/ambient account plus
-    /// explicitly configured duplicate accounts. Antigravity is intentionally
-    /// limited to one local official session until its documented status-line
-    /// interface is wired up for safe multi-account ingestion.
     var addableProviders: [ProviderID] {
         ProviderID.implemented.filter { provider in
-            provider != .antigravity || !registeredProviders.contains(where: { $0.provider == .antigravity })
+            provider.supportsMultipleAccounts || instances(of: provider).isEmpty
         }
     }
 
     var selectedProvider: ProviderInstance? {
-        guard let selectedProviderInstanceID else { return nil }
-        return registeredProviders.first { $0.id == selectedProviderInstanceID }
+        selectedProviderInstanceID.flatMap(instance)
     }
 
     @discardableResult
     func addProvider(_ provider: ProviderID) -> ProviderInstance? {
         guard addableProviders.contains(provider) else { return nil }
-        let matching = registeredProviders.indices.filter { registeredProviders[$0].provider == provider }
-        let defaultID = ProviderInstance.legacyID(for: provider)
-        let hasDefaultSlot = matching.contains { registeredProviders[$0].id == defaultID }
 
-        // Keep a single account visually clean. As soon as a second account is
-        // added, give the original a deterministic local label so two identical
-        // provider names are immediately distinguishable.
-        if matching.count == 1,
-           let first = matching.first,
-           registeredProviders[first].accountLabel == nil {
-            registeredProviders[first] = registeredProviders[first].withAccountLabel("Account 1")
-        }
-
-        let label: String?
-        if matching.isEmpty {
-            label = nil
-        } else {
-            // Count-based numbering can collide after a card is removed. Reuse
-            // the lowest free automatic ordinal instead, while respecting both
-            // generated labels and a user-entered label such as "Account 2".
-            let usedOrdinals = Set(
-                registeredProviders
-                    .filter { $0.provider == provider }
-                    .compactMap { Self.automaticAccountOrdinal($0.accountLabel) })
-            var ordinal = 1
-            while usedOrdinals.contains(ordinal) { ordinal += 1 }
-            label = "Account \(ordinal)"
-        }
-
-        // The stable default slot is unique but recoverable: if it was removed
-        // while explicit sibling accounts remain, adding the provider again
-        // restores that same default UUID so ambient client auth remains usable.
-        let id = hasDefaultSlot ? UUID() : defaultID
-        let instance = ProviderInstance(id: id, provider: provider, accountLabel: label)
+        labelExistingSingleAccountIfNeeded(provider)
+        let instance = ProviderInstance(
+            id: nextInstanceID(for: provider),
+            provider: provider,
+            accountLabel: nextAccountLabel(for: provider))
         registeredProviders.append(instance)
-        if selectedProviderInstanceID == nil { selectedProviderInstanceID = instance.id }
+        selectedProviderInstanceID = selectedProviderInstanceID ?? instance.id
         return instance
     }
 
@@ -136,9 +79,9 @@ final class SettingsStore: ObservableObject {
         registeredProviders.filter { $0.provider == provider }
     }
 
-    func moveProvider(from: IndexSet, to: Int) {
+    func moveProvider(from: IndexSet, to destination: Int) {
         var providers = registeredProviders
-        providers.move(fromOffsets: from, toOffset: to)
+        providers.move(fromOffsets: from, toOffset: destination)
         registeredProviders = providers
     }
 
@@ -146,14 +89,45 @@ final class SettingsStore: ObservableObject {
         guard registeredProviders.indices.contains(source),
               registeredProviders.indices.contains(target),
               source != target else { return }
-        let destination = source < target ? target + 1 : target
-        moveProvider(from: IndexSet(integer: source), to: destination)
+        moveProvider(
+            from: IndexSet(integer: source),
+            to: source < target ? target + 1 : target)
     }
 
     func moveProvider(_ source: UUID, onto target: UUID) {
         guard let sourceIndex = registeredProviders.firstIndex(where: { $0.id == source }),
               let targetIndex = registeredProviders.firstIndex(where: { $0.id == target }) else { return }
         moveProvider(fromIndex: sourceIndex, ontoIndex: targetIndex)
+    }
+
+    private func labelExistingSingleAccountIfNeeded(_ provider: ProviderID) {
+        let matches = registeredProviders.indices.filter { registeredProviders[$0].provider == provider }
+        guard matches.count == 1,
+              let index = matches.first,
+              registeredProviders[index].accountLabel == nil else { return }
+        registeredProviders[index] = registeredProviders[index].withAccountLabel("Account 1")
+    }
+
+    private func nextInstanceID(for provider: ProviderID) -> UUID {
+        let defaultID = ProviderInstance.legacyID(for: provider)
+        return registeredProviders.contains(where: { $0.id == defaultID }) ? UUID() : defaultID
+    }
+
+    private func nextAccountLabel(for provider: ProviderID) -> String? {
+        let siblings = instances(of: provider)
+        guard !siblings.isEmpty else { return nil }
+
+        let used = Set(siblings.compactMap { Self.automaticAccountOrdinal($0.accountLabel) })
+        let ordinal = sequence(first: 1, next: { $0 + 1 }).first { !used.contains($0) }!
+        return "Account \(ordinal)"
+    }
+
+    private func persistSelection() {
+        if let id = selectedProviderInstanceID {
+            defaults.set(id.uuidString, forKey: Keys.selectedInstanceID)
+        } else {
+            defaults.removeObject(forKey: Keys.selectedInstanceID)
+        }
     }
 
     private func persistInstances() {
@@ -166,18 +140,39 @@ final class SettingsStore: ObservableObject {
         return (try? JSONDecoder().decode([ProviderInstance].self, from: data)) ?? []
     }
 
+    private static func migratedInstances(defaults: UserDefaults) -> [ProviderInstance]? {
+        legacyProviderIDs(from: defaults)?.map {
+            ProviderInstance(id: ProviderInstance.legacyID(for: $0), provider: $0)
+        }
+    }
+
+    private static func initialSelection(
+        defaults: UserDefaults,
+        instances: [ProviderInstance]
+    ) -> UUID? {
+        if let rawID = defaults.string(forKey: Keys.selectedInstanceID),
+           let savedID = UUID(uuidString: rawID),
+           instances.contains(where: { $0.id == savedID }) {
+            return savedID
+        }
+        if let legacy = ProviderID(rawValue: defaults.string(forKey: Keys.legacySelectedProvider) ?? ""),
+           let match = instances.first(where: { $0.provider == legacy }) {
+            return match.id
+        }
+        return instances.first?.id
+    }
+
     private static func sanitized(_ instances: [ProviderInstance]) -> [ProviderInstance] {
-        let implemented = Set(ProviderID.implemented)
-        var seen = Set<UUID>()
-        var keptAntigravity = false
+        let supported = Set(ProviderID.implemented)
+        var seenIDs = Set<UUID>()
+        var seenSingleAccountProviders = Set<ProviderID>()
+
         return instances.filter { instance in
-            guard implemented.contains(instance.provider), seen.insert(instance.id).inserted else { return false }
-            if instance.provider == .antigravity {
-                guard !keptAntigravity,
-                      instance.id == ProviderInstance.legacyID(for: .antigravity) else { return false }
-                keptAntigravity = true
-            }
-            return true
+            guard supported.contains(instance.provider),
+                  seenIDs.insert(instance.id).inserted else { return false }
+            guard !instance.provider.supportsMultipleAccounts else { return true }
+            return instance.id == ProviderInstance.legacyID(for: instance.provider)
+                && seenSingleAccountProviders.insert(instance.provider).inserted
         }
     }
 
@@ -192,13 +187,13 @@ final class SettingsStore: ObservableObject {
 
     private static func legacyProviderIDs(from defaults: UserDefaults) -> [ProviderID]? {
         if let registrations = defaults.stringArray(forKey: Keys.legacyRegisteredProviders) {
-            return Self.sanitizedLegacyIDs(registrations)
+            return sanitizedLegacyIDs(registrations)
         }
         if let order = defaults.stringArray(forKey: Keys.legacyProviderOrder), !order.isEmpty {
-            return Self.sanitizedLegacyIDs(order)
+            return sanitizedLegacyIDs(order)
         }
-        if let selected = defaults.string(forKey: Keys.legacySelectedProvider),
-           let provider = ProviderID(rawValue: selected),
+        if let raw = defaults.string(forKey: Keys.legacySelectedProvider),
+           let provider = ProviderID(rawValue: raw),
            ProviderID.implemented.contains(provider) {
             return [provider]
         }
@@ -206,10 +201,11 @@ final class SettingsStore: ObservableObject {
     }
 
     private static func sanitizedLegacyIDs(_ rawValues: [String]) -> [ProviderID] {
-        let implemented = Set(ProviderID.implemented)
-        let valid = rawValues.compactMap(ProviderID.init(rawValue:)).filter(implemented.contains)
+        let supported = Set(ProviderID.implemented)
         var seen = Set<ProviderID>()
-        return valid.filter { seen.insert($0).inserted }
+        return rawValues
+            .compactMap(ProviderID.init(rawValue:))
+            .filter { supported.contains($0) && seen.insert($0).inserted }
     }
 
     private enum Keys {
