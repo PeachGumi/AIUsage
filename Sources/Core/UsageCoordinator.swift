@@ -37,7 +37,8 @@ final class UsageCoordinator: ObservableObject {
     private let providerFactory: (ProviderInstance) -> any UsageProvider
     private var providers: [UUID: any UsageProvider] = [:]
     private var instances: [UUID: ProviderInstance] = [:]
-    private var generations: [UUID: Int] = [:]
+    private var generations: [UUID: UInt64] = [:]
+    private var generationCounter: UInt64 = 0
     private var lastRefreshAllAt: Date?
     private var refreshAllInProgress = false
 
@@ -155,18 +156,22 @@ final class UsageCoordinator: ObservableObject {
         snapshots.removeValue(forKey: id)
         errors.removeValue(forKey: id)
         authenticationStates.removeValue(forKey: id)
+        generations.removeValue(forKey: id)
     }
 
-    private func beginFetch(_ id: UUID) -> Int {
-        invalidateFetch(id)
+    private func beginFetch(_ id: UUID) -> UInt64 {
+        let generation = invalidateFetch(id)
         refreshing.insert(id)
-        return generations[id, default: 0]
+        return generation
     }
 
-    private func invalidateFetch(_ id: UUID) {
-        generations[id, default: 0] += 1
+    @discardableResult
+    private func invalidateFetch(_ id: UUID) -> UInt64 {
+        generationCounter &+= 1
+        generations[id] = generationCounter
         providers[id]?.cancelActiveFetch()
         refreshing.remove(id)
+        return generationCounter
     }
 
     private func apply(
