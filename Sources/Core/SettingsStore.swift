@@ -79,25 +79,16 @@ final class SettingsStore: ObservableObject {
         registeredProviders.filter { $0.provider == provider }
     }
 
-    func moveProvider(from: IndexSet, to destination: Int) {
-        var providers = registeredProviders
-        providers.move(fromOffsets: from, toOffset: destination)
-        registeredProviders = providers
-    }
-
-    func moveProvider(fromIndex source: Int, ontoIndex target: Int) {
-        guard registeredProviders.indices.contains(source),
-              registeredProviders.indices.contains(target),
-              source != target else { return }
-        moveProvider(
-            from: IndexSet(integer: source),
-            to: source < target ? target + 1 : target)
-    }
-
     func moveProvider(_ source: UUID, onto target: UUID) {
         guard let sourceIndex = registeredProviders.firstIndex(where: { $0.id == source }),
-              let targetIndex = registeredProviders.firstIndex(where: { $0.id == target }) else { return }
-        moveProvider(fromIndex: sourceIndex, ontoIndex: targetIndex)
+              let targetIndex = registeredProviders.firstIndex(where: { $0.id == target }),
+              sourceIndex != targetIndex else { return }
+
+        var providers = registeredProviders
+        providers.move(
+            fromOffsets: IndexSet(integer: sourceIndex),
+            toOffset: sourceIndex < targetIndex ? targetIndex + 1 : targetIndex)
+        registeredProviders = providers
     }
 
     private func labelExistingSingleAccountIfNeeded(_ provider: ProviderID) {
@@ -118,7 +109,8 @@ final class SettingsStore: ObservableObject {
         guard !siblings.isEmpty else { return nil }
 
         let used = Set(siblings.compactMap { Self.automaticAccountOrdinal($0.accountLabel) })
-        let ordinal = sequence(first: 1, next: { $0 + 1 }).first { !used.contains($0) }!
+        var ordinal = 1
+        while used.contains(ordinal) { ordinal += 1 }
         return "Account \(ordinal)"
     }
 
