@@ -198,3 +198,18 @@ final class UsageCoordinator: ObservableObject {
         }
     }
 }
+
+@MainActor
+final class FailingUsageProvider: UsageProvider {
+    let id: ProviderID
+    private let failure: Error
+
+    init(id: ProviderID, failure: Error) {
+        self.id = id
+        self.failure = failure
+    }
+
+    func fetch() async throws -> ProviderSnapshot {
+        throw failure
+    }
+}

@@ -209,3 +209,45 @@ final class SettingsStore: ObservableObject {
         static let legacySelectedProvider = "menuBarProvider"
     }
 }
+
+@MainActor
+enum ProviderInstanceCredentialStore {
+    static func secret(for instance: ProviderInstance) throws -> String? {
+        try AIUsageSecretStore.load(account: secretAccount(for: instance))
+    }
+
+    static func saveSecret(_ value: String, for instance: ProviderInstance) throws {
+        try AIUsageSecretStore.save(value, account: secretAccount(for: instance))
+    }
+
+    static func deleteSecret(for instance: ProviderInstance) throws {
+        try AIUsageSecretStore.delete(account: secretAccount(for: instance))
+    }
+
+    static func credentialPath(for instanceID: UUID) -> String? {
+        let value = UserDefaults.standard.string(forKey: credentialPathKey(instanceID))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    static func saveCredentialPath(_ path: String, for instanceID: UUID) {
+        let value = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            clearCredentialPath(for: instanceID)
+        } else {
+            UserDefaults.standard.set(value, forKey: credentialPathKey(instanceID))
+        }
+    }
+
+    static func clearCredentialPath(for instanceID: UUID) {
+        UserDefaults.standard.removeObject(forKey: credentialPathKey(instanceID))
+    }
+
+    private static func secretAccount(for instance: ProviderInstance) -> String {
+        "provider.\(instance.provider.rawValue).\(instance.id.uuidString).credential"
+    }
+
+    private static func credentialPathKey(_ id: UUID) -> String {
+        "providerInstance.\(id.uuidString).credentialPath"
+    }
+}

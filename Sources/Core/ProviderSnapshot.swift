@@ -57,6 +57,20 @@ enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
         case .codex, .claude, .antigravity, .copilot, .cursor, .kimi: false
         }
     }
+
+    var staticDashboardURL: URL? {
+        switch self {
+        case .openCodeGo: nil
+        case .qwen: URL(string: "https://home.qwencloud.com/billing/subscription/token-plan-individual")!
+        case .codex: URL(string: "https://chatgpt.com/codex/settings/usage")!
+        case .claude: URL(string: "https://claude.ai/settings/usage")!
+        case .antigravity: URL(string: "https://antigravity.google")!
+        case .copilot: URL(string: "https://github.com/settings/billing")!
+        case .cursor: URL(string: "https://cursor.com/dashboard?tab=usage")!
+        case .zai: URL(string: "https://z.ai/manage-apikey/coding-plan/personal/my-plan")!
+        case .kimi: URL(string: "https://www.kimi.com/code/console")!
+        }
+    }
 }
 
 struct ProviderInstance: Codable, Hashable, Identifiable, Sendable {

@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let instance = settings.instance(instanceID) else { return }
 
         do {
-            try ProviderInstanceAccountStore.deleteSecret(for: instance)
+            try ProviderInstanceCredentialStore.deleteSecret(for: instance)
         } catch {
             showError(title: "Could not remove account credential", error: error)
             return
@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for: instance,
             qwenRepository: qwenRepositories.removeValue(forKey: instanceID),
             openCodeStore: openCodeStores.removeValue(forKey: instanceID))
-        ProviderInstanceAccountStore.clearCredentialPath(for: instanceID)
+        ProviderInstanceCredentialStore.clearCredentialPath(for: instanceID)
         settings.removeProvider(instanceID)
         syncProviders()
     }
@@ -187,11 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 configuredProvider: { token in CursorProvider(tokenLoader: { token }) })
 
         case .zai:
-            return ZAIProvider(keyLoader: {
-                if let value = try ProviderInstanceAccountStore.secret(for: instance) { return value }
-                guard instance.isDefaultSlot else { return nil }
-                return try Self.defaultZAIKey()
-            })
+            return secretBackedProvider(
+                instance,
+                missingMessage: "Set a Z.AI Coding Plan API key with Account… before refreshing this account.",
+                defaultProvider: { ZAIProvider() },
+                configuredProvider: { token in ZAIProvider(keyLoader: { token }) })
 
         case .kimi:
             return secretBackedProvider(
@@ -212,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defaultProvider: () -> any UsageProvider,
         configuredProvider: (URL) -> any UsageProvider
     ) -> any UsageProvider {
-        if let path = ProviderInstanceAccountStore.credentialPath(for: instance.id) {
+        if let path = ProviderInstanceCredentialStore.credentialPath(for: instance.id) {
             return configuredProvider(URL(fileURLWithPath: path))
         }
         return instance.isDefaultSlot
@@ -227,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configuredProvider: (String) -> any UsageProvider
     ) -> any UsageProvider {
         do {
-            if let secret = try ProviderInstanceAccountStore.secret(for: instance) {
+            if let secret = try ProviderInstanceCredentialStore.secret(for: instance) {
                 return configuredProvider(secret)
             }
             return instance.isDefaultSlot
@@ -236,12 +236,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             return FailingUsageProvider(id: instance.provider, failure: error)
         }
-    }
-
-    private static func defaultZAIKey() throws -> String? {
-        try AIUsageSecretStore.load(account: ZAIProvider.keychainAccount)
-            ?? ProcessInfo.processInfo.environment["Z_AI_API_KEY"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func missingAccountProvider(
@@ -317,8 +311,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.informativeText = "Start Antigravity and sign in there, then Refresh in AIUsage. AIUsage does not perform Google OAuth or direct Antigravity quota requests. Multiple Antigravity accounts are disabled until the official CLI status-line integration is available in AIUsage."
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Open Antigravity")
-        if alert.runModal() == .alertSecondButtonReturn {
-            NSWorkspace.shared.open(URL(string: "https://antigravity.google")!)
+        if alert.runModal() == .alertSecondButtonReturn,
+           let url = ProviderID.antigravity.staticDashboardURL {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -342,9 +337,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             switch alert.runModal() {
             case .alertFirstButtonReturn:
-                try ProviderInstanceAccountStore.saveSecret(field.stringValue, for: instance)
+                try ProviderInstanceCredentialStore.saveSecret(field.stringValue, for: instance)
             case .alertSecondButtonReturn:
-                try ProviderInstanceAccountStore.deleteSecret(for: instance)
+                try ProviderInstanceCredentialStore.deleteSecret(for: instance)
             default:
                 return
             }
@@ -364,7 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch choice.runModal() {
         case .alertSecondButtonReturn:
-            ProviderInstanceAccountStore.clearCredentialPath(for: instance.id)
+            ProviderInstanceCredentialStore.clearCredentialPath(for: instance.id)
             refreshAfterCredentialChange(instance.id)
             return
         case .alertFirstButtonReturn:
@@ -383,7 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.prompt = "Use for this account"
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        ProviderInstanceAccountStore.saveCredentialPath(url.path, for: instance.id)
+        ProviderInstanceCredentialStore.saveCredentialPath(url.path, for: instance.id)
         refreshAfterCredentialChange(instance.id)
     }
 
@@ -475,7 +470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .zai:
             do {
-                try ProviderInstanceAccountStore.deleteSecret(for: instance)
+                try ProviderInstanceCredentialStore.deleteSecret(for: instance)
                 if instance.isDefaultSlot {
                     try AIUsageSecretStore.delete(account: ZAIProvider.keychainAccount)
                 }
@@ -503,7 +498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Dashboard URLs
+    // MARK: - External URLs
 
     private func openDashboard(_ instanceID: UUID) {
         guard let instance = settings.instance(instanceID) else { return }
@@ -517,26 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func dashboardURL(_ instance: ProviderInstance) -> URL {
-        switch instance.provider {
-        case .openCodeGo:
-            openCodeStore(for: instance).usageURL
-        case .qwen:
-            URL(string: "https://home.qwencloud.com/billing/subscription/token-plan-individual")!
-        case .codex:
-            URL(string: "https://chatgpt.com/codex/settings/usage")!
-        case .claude:
-            URL(string: "https://claude.ai/settings/usage")!
-        case .antigravity:
-            URL(string: "https://antigravity.google")!
-        case .copilot:
-            URL(string: "https://github.com/settings/billing")!
-        case .cursor:
-            URL(string: "https://cursor.com/dashboard?tab=usage")!
-        case .zai:
-            URL(string: "https://z.ai/manage-apikey/coding-plan/personal/my-plan")!
-        case .kimi:
-            URL(string: "https://www.kimi.com/code/console")!
-        }
+        instance.provider.staticDashboardURL ?? openCodeStore(for: instance).usageURL
     }
 
     nonisolated static func websiteDataRecordName(_ recordName: String, matches domain: String) -> Bool {
@@ -577,62 +553,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = title
         alert.informativeText = error.localizedDescription
         alert.runModal()
-    }
-}
-
-@MainActor
-enum ProviderInstanceAccountStore {
-    static func secret(for instance: ProviderInstance) throws -> String? {
-        try AIUsageSecretStore.load(account: secretAccount(for: instance))
-    }
-
-    static func saveSecret(_ value: String, for instance: ProviderInstance) throws {
-        try AIUsageSecretStore.save(value, account: secretAccount(for: instance))
-    }
-
-    static func deleteSecret(for instance: ProviderInstance) throws {
-        try AIUsageSecretStore.delete(account: secretAccount(for: instance))
-    }
-
-    static func credentialPath(for instanceID: UUID) -> String? {
-        let value = UserDefaults.standard.string(forKey: credentialPathKey(instanceID))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return value?.isEmpty == false ? value : nil
-    }
-
-    static func saveCredentialPath(_ path: String, for instanceID: UUID) {
-        let value = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.isEmpty {
-            clearCredentialPath(for: instanceID)
-        } else {
-            UserDefaults.standard.set(value, forKey: credentialPathKey(instanceID))
-        }
-    }
-
-    static func clearCredentialPath(for instanceID: UUID) {
-        UserDefaults.standard.removeObject(forKey: credentialPathKey(instanceID))
-    }
-
-    private static func secretAccount(for instance: ProviderInstance) -> String {
-        "provider.\(instance.provider.rawValue).\(instance.id.uuidString).credential"
-    }
-
-    private static func credentialPathKey(_ id: UUID) -> String {
-        "providerInstance.\(id.uuidString).credentialPath"
-    }
-}
-
-@MainActor
-private final class FailingUsageProvider: UsageProvider {
-    let id: ProviderID
-    private let failure: Error
-
-    init(id: ProviderID, failure: Error) {
-        self.id = id
-        self.failure = failure
-    }
-
-    func fetch() async throws -> ProviderSnapshot {
-        throw failure
     }
 }
