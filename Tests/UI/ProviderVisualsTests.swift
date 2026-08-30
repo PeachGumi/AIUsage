@@ -71,7 +71,8 @@ final class QuotaRecoveryDetectorTests: XCTestCase {
             windows: [(.fiveHour, 0.1)])
         let full = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0)])
 
-        XCTAssertEqual(ninetyNinePointNineRemaining.windows.first?.remainingPercent, 99.9, accuracy: 0.000_001)
+        let remaining = try XCTUnwrap(ninetyNinePointNineRemaining.windows.first?.remainingPercent)
+        XCTAssertEqual(remaining, 99.9, accuracy: 0.000_001)
         XCTAssertTrue(detector.observe(
             snapshots: [instance.id: ninetyNinePointNineRemaining],
             instanceLookup: { $0 == instance.id ? instance : nil }).isEmpty)
