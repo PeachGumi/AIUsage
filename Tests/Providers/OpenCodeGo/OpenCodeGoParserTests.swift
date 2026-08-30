@@ -22,6 +22,31 @@ final class OpenCodeGoParserTests: XCTestCase {
         XCTAssertEqual(result.snapshot.windows.map(\.usedPercent), [11, 22, 33])
     }
 
+    func testParsedNinetyNinePointNineRemainingTransitionTriggersRecovery() throws {
+        let partialJSON = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"5-hour","value":"0.1%"},{"label":"Weekly","value":"20%"},{"label":"Monthly","value":"30%"}],"promo":false,"other":false,"useBalance":false}"#
+        let recoveredJSON = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"5-hour","value":"0%"},{"label":"Weekly","value":"20%"},{"label":"Monthly","value":"30%"}],"promo":false,"other":false,"useBalance":false}"#
+        let partial = try OpenCodeGoParser.parse(jsonText: partialJSON).snapshot
+        let recovered = try OpenCodeGoParser.parse(jsonText: recoveredJSON).snapshot
+        let instance = ProviderInstance(provider: .openCodeGo)
+        var detector = QuotaRecoveryDetector()
+
+        let partialFiveHour = try XCTUnwrap(partial.windows.first { $0.kind == .fiveHour })
+        XCTAssertEqual(partialFiveHour.usedPercent, 0.1, accuracy: 0.000_001)
+        XCTAssertEqual(partialFiveHour.remainingPercent, 99.9, accuracy: 0.000_001)
+        XCTAssertTrue(detector.observe(
+            snapshots: [instance.id: partial],
+            instanceLookup: { $0 == instance.id ? instance : nil }).isEmpty)
+
+        let events = detector.observe(
+            snapshots: [instance.id: recovered],
+            instanceLookup: { $0 == instance.id ? instance : nil })
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.provider, .openCodeGo)
+        XCTAssertEqual(events.first?.windowKind, .fiveHour)
+        XCTAssertEqual(events.first?.message, "5時間利用量が回復しました！")
+    }
+
     func testAmbiguousPartiallyRecognizedLabelsFailClosed() {
         let json = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"Monthly","value":"33%"},{"label":"Current limit","value":"11%"},{"label":"Weekly usage","value":"22%"}],"promo":false,"other":false,"useBalance":false}"#
 
