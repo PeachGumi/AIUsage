@@ -7,6 +7,212 @@ final class PopoverLayoutMetrics: ObservableObject {
     @Published var providerListHeight: CGFloat = 0
 }
 
+struct QuotaRecoveryEvent: Equatable, Sendable {
+    let instanceID: UUID
+    let provider: ProviderID
+    let accountTitle: String
+    let windowID: String
+    let windowKind: UsageWindowKind
+
+    var message: String {
+        "\(Self.windowName(windowKind))利用量が回復しました！"
+    }
+
+    private static func windowName(_ kind: UsageWindowKind) -> String {
+        switch kind {
+        case .fiveHour: "5時間"
+        case .weekly: "週間"
+        case .monthly: "月間"
+        }
+    }
+}
+
+/// Detects only transitions from a partially consumed quota to a completely
+/// restored quota. The first observation is a baseline and never emits an event.
+struct QuotaRecoveryDetector {
+    private struct Key: Hashable {
+        let instanceID: UUID
+        let windowID: String
+    }
+
+    private var previousRemaining: [Key: Double] = [:]
+
+    mutating func observe(
+        snapshots: [UUID: ProviderSnapshot],
+        instanceLookup: (UUID) -> ProviderInstance?
+    ) -> [QuotaRecoveryEvent] {
+        var activeKeys: Set<Key> = []
+        var events: [QuotaRecoveryEvent] = []
+
+        for (instanceID, snapshot) in snapshots {
+            guard let instance = instanceLookup(instanceID) else { continue }
+
+            for window in snapshot.windows {
+                let key = Key(instanceID: instanceID, windowID: window.id)
+                activeKeys.insert(key)
+                let remaining = window.remainingPercent
+
+                if let previous = previousRemaining[key],
+                   previous < 100,
+                   remaining >= 100
+                {
+                    events.append(QuotaRecoveryEvent(
+                        instanceID: instanceID,
+                        provider: snapshot.provider,
+                        accountTitle: instance.title,
+                        windowID: window.id,
+                        windowKind: window.kind))
+                }
+
+                previousRemaining[key] = remaining
+            }
+        }
+
+        previousRemaining = previousRemaining.filter { activeKeys.contains($0.key) }
+        return events.sorted {
+            ($0.accountTitle, $0.windowKind.sortOrderForRecoveryToast, $0.windowID)
+                < ($1.accountTitle, $1.windowKind.sortOrderForRecoveryToast, $1.windowID)
+        }
+    }
+}
+
+private extension UsageWindowKind {
+    var sortOrderForRecoveryToast: Int {
+        switch self {
+        case .fiveHour: 0
+        case .weekly: 1
+        case .monthly: 2
+        }
+    }
+}
+
+@MainActor
+private final class QuotaRecoveryToastController {
+    private struct Toast {
+        let title: String
+        let message: String
+    }
+
+    private weak var anchorView: NSView?
+    private let panel: NSPanel
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let messageLabel = NSTextField(labelWithString: "")
+    private var queue: [Toast] = []
+    private var dismissWorkItem: DispatchWorkItem?
+    private var isShowing = false
+
+    init(anchorView: NSView) {
+        self.anchorView = anchorView
+        panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 330, height: 72),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false)
+
+        panel.level = .popUpMenu
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+
+        let effectView = NSVisualEffectView(frame: panel.contentView?.bounds ?? .zero)
+        effectView.material = .hudWindow
+        effectView.blendingMode = .behindWindow
+        effectView.state = .active
+        effectView.wantsLayer = true
+        effectView.layer?.cornerRadius = 12
+        effectView.layer?.masksToBounds = true
+        effectView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        messageLabel.font = .systemFont(ofSize: 12.5, weight: .regular)
+        messageLabel.textColor = .secondaryLabelColor
+        messageLabel.lineBreakMode = .byTruncatingTail
+
+        let stack = NSStackView(views: [titleLabel, messageLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        effectView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: effectView.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: effectView.trailingAnchor, constant: -16),
+            stack.centerYAnchor.constraint(equalTo: effectView.centerYAnchor),
+        ])
+
+        panel.contentView = effectView
+    }
+
+    func enqueue(title: String, message: String) {
+        queue.append(Toast(title: title, message: message))
+        showNextIfNeeded()
+    }
+
+    private func showNextIfNeeded() {
+        guard !isShowing, !queue.isEmpty else { return }
+        guard let anchorView, let anchorWindow = anchorView.window else {
+            queue.removeAll()
+            return
+        }
+
+        isShowing = true
+        let toast = queue.removeFirst()
+        titleLabel.stringValue = toast.title
+        messageLabel.stringValue = toast.message
+
+        let anchorInWindow = anchorView.convert(anchorView.bounds, to: nil)
+        let anchorOnScreen = anchorWindow.convertToScreen(anchorInWindow)
+        positionPanel(below: anchorOnScreen, on: anchorWindow.screen)
+
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            panel.animator().alphaValue = 1
+        }
+
+        let item = DispatchWorkItem { [weak self] in self?.dismissCurrent() }
+        dismissWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2, execute: item)
+    }
+
+    private func positionPanel(below anchor: NSRect, on screen: NSScreen?) {
+        let visibleFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let size = panel.frame.size
+        let margin: CGFloat = 8
+        let idealX = anchor.midX - size.width / 2
+        let minX = visibleFrame.minX + margin
+        let maxX = visibleFrame.maxX - size.width - margin
+        let x = min(max(idealX, minX), maxX)
+        let y = max(visibleFrame.minY + margin, anchor.minY - size.height - 7)
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func dismissCurrent() {
+        dismissWorkItem?.cancel()
+        dismissWorkItem = nil
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.20
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.panel.orderOut(nil)
+                self.isShowing = false
+                self.showNextIfNeeded()
+            }
+        })
+    }
+}
+
 @MainActor
 final class StatusItemController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -14,6 +220,8 @@ final class StatusItemController: NSObject {
     private let coordinator: UsageCoordinator
     private let settings: SettingsStore
     private let layoutMetrics = PopoverLayoutMetrics()
+    private var recoveryDetector = QuotaRecoveryDetector()
+    private var recoveryToastController: QuotaRecoveryToastController?
     private var cancellables: Set<AnyCancellable> = []
 
     init(coordinator: UsageCoordinator, settings: SettingsStore, actions: AppActions) {
@@ -44,6 +252,7 @@ final class StatusItemController: NSObject {
         button.imagePosition = .imageOnly
         button.setAccessibilityRole(.button)
         button.addObserver(self, forKeyPath: "effectiveAppearance", context: nil)
+        recoveryToastController = QuotaRecoveryToastController(anchorView: button)
     }
 
     override func observeValue(
@@ -70,6 +279,21 @@ final class StatusItemController: NSObject {
             .sink { [weak self] _ in
                 self?.updatePopoverSize()
                 self?.render()
+            }
+            .store(in: &cancellables)
+
+        coordinator.$snapshots
+            .receive(on: RunLoop.main)
+            .sink { [weak self] snapshots in
+                guard let self else { return }
+                let events = self.recoveryDetector.observe(
+                    snapshots: snapshots,
+                    instanceLookup: { [weak self] id in self?.coordinator.instance(id) })
+                for event in events {
+                    self.recoveryToastController?.enqueue(
+                        title: event.accountTitle,
+                        message: event.message)
+                }
             }
             .store(in: &cancellables)
 
