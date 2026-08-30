@@ -108,16 +108,49 @@ AIUsageでは統合種別とカードを分けています。
 | Cursor | Cursor.appの現在のlogin | カード固有access tokenをKeychainへ保存必須 |
 | Z.AI | legacy key / environmentも互換利用可 | UUID別API key必須 |
 | Kimi Code | Kimi CLI / environment | カード固有API keyをKeychainへ保存必須 |
-| Antigravity | 公式Antigravityの現在のlocal session | **現在は追加不可** |
+| Antigravity | CLI status-line cache / desktop local session | **現在は追加不可** |
 
 ### Antigravity
 
-Antigravityは現在Experimentalで、**1つのlocal sessionだけ**を表示します。AIUsageは実行中の公式Antigravityプロセスからlocalhost上のusage情報を取得し、Google OAuth tokenを作成・保存したり、Googleのremote quota endpointへ直接アクセスしたりしません。
+Antigravityは現在Experimentalで、**1アカウントのみ**対応しています。取得経路は次の優先順です。
 
-Antigravityの2アカウント目は現時点では追加できません。将来は、公式Antigravity CLIがcustom status-line scriptへ渡すdocumented JSON（quota / email / plan tierなど）を使ったpassive local integrationへ移行する予定です。第三者OAuth credentialを再利用する方式は採用しません。
+1. Antigravity CLIが公式custom status-line scriptへ渡すJSON payloadを、AIUsage用bridgeでローカルキャッシュして読み取る
+2. キャッシュがない場合は、従来どおり実行中のAntigravity desktop local sessionを利用する
+
+CLI経路ではGoogle OAuth tokenを作成・保存せず、Googleのremote quota endpointへ直接アクセスしません。公式status-line payloadには `quota`、`email`、`plan_tier` などが含まれますが、AIUsageのbridgeは**`product`と`quota`だけを抽出して保存**します。cwd、conversation ID、emailなどstatus-lineの他フィールドはキャッシュしません。
+
+#### Antigravity CLI bridgeの設定
+
+まずbridgeを実行可能にします。
+
+```bash
+chmod +x "$(pwd)/Scripts/antigravity_statusline.sh"
+```
+
+次にAntigravity CLIの `~/.gemini/antigravity-cli/settings.json` でstatus line commandを設定します。`/absolute/path/to/AIUsage` は実際のclone先へ置き換えてください。
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "/absolute/path/to/AIUsage/Scripts/antigravity_statusline.sh",
+    "stack_with_default": true
+  }
+}
+```
+
+またはAntigravity CLI内で次を実行してcommandを設定できます。
+
+```text
+/statusline /absolute/path/to/AIUsage/Scripts/antigravity_statusline.sh
+```
+
+`stack_with_default: true` を使うと、AIUsage bridgeを動かしながらAntigravity標準status lineも残せます。CLIのagent stateが更新されるたび、bridgeは `~/Library/Application Support/AIUsage/antigravity-status.json` を原子的に更新します。AIUsageはこのファイルを優先して読み、ファイルの更新日時をsnapshotの取得時刻として扱います。
 
 > [!NOTE]
-> 現行Antigravity integrationは実行中のlocal processを検出するため、Antigravityを起動・ログインした状態でRefreshしてください。
+> status-line方式はCLIがpayloadを生成した時点の**最新既知値をローカルに保持する方式**です。CLIを終了した後も最後の値は表示できますが、CLIが動いていない間にGoogle側のquotaを能動的に再取得するものではありません。
+
+Antigravityの2アカウント目は現時点では追加できません。status-line payloadの`email`をAIUsage側へ保存せずに安全に複数identityへ振り分ける設計を固めてから対応します。
 
 ### Remove と外部ログアウト
 
@@ -138,7 +171,7 @@ Antigravityの2アカウント目は現時点では追加できません。将�
 | **OpenAI Codex** | 検証済み | 5-hour / Weekly | defaultはCodex CLI OAuth、追加カードは別`auth.json` |
 | **Qwen Cloud** | Experimental | 5-hour / Weekly | AIUsage内Web login。カードごとにWebKit分離 |
 | **Claude** | Experimental | 5-hour / Weekly | defaultはClaude Code OAuth、追加カードは別credential file |
-| **Antigravity** | Experimental | Gemini / Claude・GPTの5-hour / Weekly | 実行中の公式Antigravity local process。現在1カードのみ |
+| **Antigravity** | Experimental | Gemini / Claude・GPTの5-hour / Weekly | 公式CLI status-line cache優先、desktop local sessionへfallback。現在1カードのみ |
 | **GitHub Copilot** | Experimental | Monthly quota | defaultはGitHub CLI/env、追加カードはKeychain token |
 | **Cursor** | Experimental | Monthly usage pools | defaultはCursor.app、追加カードはKeychain token |
 | **Z.AI GLM** | Experimental | 5-hour / Weekly | UUID別Coding Plan API key |
@@ -176,6 +209,7 @@ Experimental統合は未知のレスポンス形状を0%として推測せず、
 | Provider HTTP session | ephemeral、共有Cookie / credential / URL cacheなし |
 | credential付きHTTP redirect | 拒否 |
 | 外部client credential | 読み取り専用。AIUsageから変更・削除しない |
+| Antigravity CLI cache | `product` / `quota`のみ。cwd / conversation ID / email等は保存しない |
 | ログ | OAuth token、API key、Cookie、account ID、workspace ID、実usage本文を出力しない |
 
 詳細は [PRIVACY.md](PRIVACY.md) と [SECURITY.md](SECURITY.md) を参照してください。
@@ -202,14 +236,14 @@ Experimental統合は未知のレスポンス形状を0%として推測せず、
 <details>
 <summary><strong>Antigravityを2枚追加できない</strong></summary>
 
-現在は1 local sessionだけ対応しています。第三者Google OAuthによる複数アカウント化は行いません。公式CLIのstatus-line payloadを使う方式を今後の候補にしています。
+現在は1アカウントのみ対応しています。第三者Google OAuthによる複数アカウント化は行いません。CLI status-line payloadを安全に複数identityへ分離する方式を今後検討します。
 
 </details>
 
 <details>
 <summary><strong>Antigravityが取得できない</strong></summary>
 
-公式Antigravityを起動し、ログインしてからRefreshしてください。現在のExperimental integrationは実行中local processを検出します。
+Antigravity CLIを使う場合は上記status-line bridgeを設定して、CLIで一度agent stateを更新してください。`~/Library/Application Support/AIUsage/antigravity-status.json` が生成されればAIUsageから読めます。desktop版を使う場合はAntigravityを起動・ログインしてRefreshしてください。
 
 </details>
 
@@ -233,7 +267,7 @@ flowchart LR
     Coordinator --> Runtime[UsageProvider runtime per instance]
     Runtime --> Files[Codex / Claude credential files]
     Runtime --> Web[OpenCode / Qwen WebKit profiles]
-    Runtime --> Local[Antigravity local process]
+    Runtime --> Local[Antigravity status-line cache / desktop local process]
     Runtime --> Keys[Copilot / Cursor / Z.AI / Kimi Keychain]
 ```
 
@@ -303,7 +337,7 @@ Live Testsでもtoken、Cookie、実使用率をログへ出しません。
 主なテーマ:
 
 - Experimental Providerの実アカウント検証
-- Antigravity公式CLI status-line payloadによるpassive local integration / multi-account検討
+- Antigravity CLI status-line payloadの実アカウント検証 / multi-account検討
 - Qwen / OpenCodeの追加fault injection
 - login lifecycle / UI end-to-end tests
 - Provider仕様変更を検知するcontract tests
