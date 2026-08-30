@@ -48,11 +48,13 @@ final class ProviderVisualsTests: XCTestCase {
             XCTAssertEqual(provider.accountAction, action, provider.displayName)
         }
     }
+}
 
-    func testQuotaRecoveryDetectorDoesNotNotifyOnInitialFullQuota() throws {
+final class QuotaRecoveryDetectorTests: XCTestCase {
+    func testDoesNotNotifyOnInitialFullQuota() throws {
         let instance = ProviderInstance(provider: .openCodeGo)
         var detector = QuotaRecoveryDetector()
-        let snapshot = try quotaSnapshot(provider: .openCodeGo, usedPercent: 0)
+        let snapshot = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0)])
 
         let events = detector.observe(
             snapshots: [instance.id: snapshot],
@@ -61,14 +63,18 @@ final class ProviderVisualsTests: XCTestCase {
         XCTAssertTrue(events.isEmpty)
     }
 
-    func testQuotaRecoveryDetectorNotifiesOnTransitionToFull() throws {
+    func testNotifiesForRequestedNinetyNinePointNineToOneHundredTransition() throws {
         let instance = ProviderInstance(provider: .openCodeGo)
         var detector = QuotaRecoveryDetector()
-        let partial = try quotaSnapshot(provider: .openCodeGo, usedPercent: 0.1)
-        let full = try quotaSnapshot(provider: .openCodeGo, usedPercent: 0)
+        let ninetyNinePointNineRemaining = try quotaSnapshot(
+            provider: .openCodeGo,
+            windows: [(.fiveHour, 0.1)])
+        let full = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0)])
 
+        let remaining = try XCTUnwrap(ninetyNinePointNineRemaining.windows.first?.remainingPercent)
+        XCTAssertEqual(remaining, 99.9, accuracy: 0.000_001)
         XCTAssertTrue(detector.observe(
-            snapshots: [instance.id: partial],
+            snapshots: [instance.id: ninetyNinePointNineRemaining],
             instanceLookup: { $0 == instance.id ? instance : nil }).isEmpty)
 
         let events = detector.observe(
@@ -81,11 +87,27 @@ final class ProviderVisualsTests: XCTestCase {
         XCTAssertEqual(events.first?.message, "5時間利用量が回復しました！")
     }
 
-    func testQuotaRecoveryDetectorDoesNotRepeatWhileQuotaStaysFull() throws {
+    func testDoesNotNotifyUntilQuotaActuallyReachesFull() throws {
         let instance = ProviderInstance(provider: .openCodeGo)
         var detector = QuotaRecoveryDetector()
-        let partial = try quotaSnapshot(provider: .openCodeGo, usedPercent: 25)
-        let full = try quotaSnapshot(provider: .openCodeGo, usedPercent: 0)
+        let first = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0.2)])
+        let second = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0.1)])
+
+        _ = detector.observe(
+            snapshots: [instance.id: first],
+            instanceLookup: { $0 == instance.id ? instance : nil })
+        let events = detector.observe(
+            snapshots: [instance.id: second],
+            instanceLookup: { $0 == instance.id ? instance : nil })
+
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func testDoesNotRepeatWhileQuotaStaysFull() throws {
+        let instance = ProviderInstance(provider: .openCodeGo)
+        var detector = QuotaRecoveryDetector()
+        let partial = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 25)])
+        let full = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0)])
 
         _ = detector.observe(
             snapshots: [instance.id: partial],
@@ -101,11 +123,79 @@ final class ProviderVisualsTests: XCTestCase {
         XCTAssertTrue(repeated.isEmpty)
     }
 
-    func testQuotaRecoveryDetectorResetsBaselineAfterAccountDisappears() throws {
+    func testCanNotifyAgainAfterQuotaIsConsumedAgain() throws {
         let instance = ProviderInstance(provider: .openCodeGo)
         var detector = QuotaRecoveryDetector()
-        let partial = try quotaSnapshot(provider: .openCodeGo, usedPercent: 50)
-        let full = try quotaSnapshot(provider: .openCodeGo, usedPercent: 0)
+        let partial = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 10)])
+        let full = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0)])
+
+        _ = detector.observe(
+            snapshots: [instance.id: partial],
+            instanceLookup: { $0 == instance.id ? instance : nil })
+        XCTAssertEqual(detector.observe(
+            snapshots: [instance.id: full],
+            instanceLookup: { $0 == instance.id ? instance : nil }).count, 1)
+        XCTAssertTrue(detector.observe(
+            snapshots: [instance.id: partial],
+            instanceLookup: { $0 == instance.id ? instance : nil }).isEmpty)
+
+        let secondRecovery = detector.observe(
+            snapshots: [instance.id: full],
+            instanceLookup: { $0 == instance.id ? instance : nil })
+
+        XCTAssertEqual(secondRecovery.count, 1)
+        XCTAssertEqual(secondRecovery.first?.windowKind, .fiveHour)
+    }
+
+    func testTracksQuotaWindowsIndependentlyAndInStableOrder() throws {
+        let instance = ProviderInstance(provider: .openCodeGo)
+        var detector = QuotaRecoveryDetector()
+        let partial = try quotaSnapshot(
+            provider: .openCodeGo,
+            windows: [(.monthly, 0), (.weekly, 1), (.fiveHour, 0.1)])
+        let recovered = try quotaSnapshot(
+            provider: .openCodeGo,
+            windows: [(.monthly, 0), (.weekly, 0), (.fiveHour, 0)])
+
+        _ = detector.observe(
+            snapshots: [instance.id: partial],
+            instanceLookup: { $0 == instance.id ? instance : nil })
+        let events = detector.observe(
+            snapshots: [instance.id: recovered],
+            instanceLookup: { $0 == instance.id ? instance : nil })
+
+        XCTAssertEqual(events.map(\.windowKind), [.fiveHour, .weekly])
+        XCTAssertEqual(events.map(\.message), [
+            "5時間利用量が回復しました！",
+            "週間利用量が回復しました！",
+        ])
+    }
+
+    func testTracksDuplicateAccountsIndependently() throws {
+        let personal = ProviderInstance(provider: .openCodeGo, accountLabel: "Personal")
+        let work = ProviderInstance(provider: .openCodeGo, accountLabel: "Work")
+        let partial = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0.1)])
+        let full = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0)])
+        let instances = [personal.id: personal, work.id: work]
+        var detector = QuotaRecoveryDetector()
+
+        _ = detector.observe(
+            snapshots: [personal.id: partial, work.id: full],
+            instanceLookup: { instances[$0] })
+        let events = detector.observe(
+            snapshots: [personal.id: full, work.id: full],
+            instanceLookup: { instances[$0] })
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.instanceID, personal.id)
+        XCTAssertEqual(events.first?.accountTitle, "OpenCode Go · Personal")
+    }
+
+    func testResetsBaselineAfterAccountDisappears() throws {
+        let instance = ProviderInstance(provider: .openCodeGo)
+        var detector = QuotaRecoveryDetector()
+        let partial = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 50)])
+        let full = try quotaSnapshot(provider: .openCodeGo, windows: [(.fiveHour, 0)])
 
         _ = detector.observe(
             snapshots: [instance.id: partial],
@@ -119,16 +209,29 @@ final class ProviderVisualsTests: XCTestCase {
         XCTAssertTrue(events.isEmpty)
     }
 
-    private func quotaSnapshot(provider: ProviderID, usedPercent: Double) throws -> ProviderSnapshot {
+    private func quotaSnapshot(
+        provider: ProviderID,
+        windows: [(UsageWindowKind, Double)]
+    ) throws -> ProviderSnapshot {
         ProviderSnapshot(
             provider: provider,
             planName: nil,
-            windows: [try UsageWindow(
-                kind: .fiveHour,
-                label: "5-hour",
-                usedPercent: usedPercent,
-                resetsAt: nil,
-                resetDescription: nil)],
+            windows: try windows.map { kind, usedPercent in
+                try UsageWindow(
+                    kind: kind,
+                    label: label(for: kind),
+                    usedPercent: usedPercent,
+                    resetsAt: nil,
+                    resetDescription: nil)
+            },
             fetchedAt: Date())
+    }
+
+    private func label(for kind: UsageWindowKind) -> String {
+        switch kind {
+        case .fiveHour: "5-hour"
+        case .weekly: "Weekly"
+        case .monthly: "Monthly"
+        }
     }
 }
