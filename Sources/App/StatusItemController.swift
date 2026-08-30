@@ -112,6 +112,43 @@ struct QuotaRecoveryToastLayout {
     }
 }
 
+/// Reads only OpenCode's documented local auth storage for the stable default
+/// card. Duplicate AIUsage cards never inherit ambient CLI credentials.
+enum OpenCodeGoAmbientCredentialLoader {
+    static func apiKey(
+        for instance: ProviderInstance,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> String? {
+        guard instance.provider == .openCodeGo, instance.isDefaultSlot else { return nil }
+
+        if let environmentKey = cleaned(environment["OPENCODE_API_KEY"]) {
+            return environmentKey
+        }
+
+        let authURL = homeDirectory
+            .appendingPathComponent(".local", isDirectory: true)
+            .appendingPathComponent("share", isDirectory: true)
+            .appendingPathComponent("opencode", isDirectory: true)
+            .appendingPathComponent("auth.json", isDirectory: false)
+        guard let data = try? Data(contentsOf: authURL, options: .mappedIfSafe) else { return nil }
+        return apiKey(fromAuthData: data)
+    }
+
+    static func apiKey(fromAuthData data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entry = object["opencode"] as? [String: Any],
+              entry["type"] as? String == "api"
+        else { return nil }
+        return cleaned(entry["key"] as? String)
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 @MainActor
 private final class QuotaRecoveryToastController {
     private struct Toast {
@@ -245,12 +282,19 @@ final class StatusItemController: NSObject {
     private let layoutMetrics = PopoverLayoutMetrics()
     private var recoveryDetector = QuotaRecoveryDetector()
     private var recoveryToastController: QuotaRecoveryToastController?
+    private var openCodeRecoveryMonitor: OpenCodeGoRecoveryMonitor?
     private var cancellables: Set<AnyCancellable> = []
 
     init(coordinator: UsageCoordinator, settings: SettingsStore, actions: AppActions) {
         self.coordinator = coordinator
         self.settings = settings
         super.init()
+
+        openCodeRecoveryMonitor = OpenCodeGoRecoveryMonitor(
+            keyLoader: { instance in OpenCodeGoAmbientCredentialLoader.apiKey(for: instance) },
+            confirmRefresh: { [weak coordinator] id in
+                await coordinator?.refresh(id)
+            })
 
         let dashboard = DashboardView(
             coordinator: coordinator,
@@ -263,6 +307,7 @@ final class StatusItemController: NSObject {
 
         configureButton()
         observeChanges()
+        openCodeRecoveryMonitor?.sync(instances: settings.registeredProviders)
         updatePopoverSize()
         render()
     }
@@ -302,6 +347,13 @@ final class StatusItemController: NSObject {
             .sink { [weak self] _ in
                 self?.updatePopoverSize()
                 self?.render()
+            }
+            .store(in: &cancellables)
+
+        settings.$registeredProviders
+            .receive(on: RunLoop.main)
+            .sink { [weak self] instances in
+                self?.openCodeRecoveryMonitor?.sync(instances: instances)
             }
             .store(in: &cancellables)
 
