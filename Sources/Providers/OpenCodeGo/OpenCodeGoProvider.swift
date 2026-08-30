@@ -391,7 +391,7 @@ final class OpenCodeGoRecoveryMonitor {
             .filter { $0.provider == .openCodeGo }
             .map { ($0.id, $0) })
 
-        for id in Set(tasks.keys).subtracting(eligible.keys) {
+        for id in Set(tasks.keys).subtracting(Set(eligible.keys)) {
             tasks.removeValue(forKey: id)?.cancel()
         }
         for (id, instance) in eligible where tasks[id] == nil {
@@ -423,7 +423,11 @@ final class OpenCodeGoRecoveryMonitor {
             do {
                 guard let apiKey = try keyLoader(instance),
                       !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                else { return }
+                else {
+                    previous = nil
+                    try await sleep(seconds: OpenCodeGoRecoveryPlanner.normalRecheckInterval)
+                    continue
+                }
 
                 let current = try await OpenCodeGoAPIClient.fetch(apiKey: apiKey, session: session)
                 if OpenCodeGoRecoveryPlanner.didRecover(previous: previous, current: current) {
@@ -436,8 +440,8 @@ final class OpenCodeGoRecoveryMonitor {
             } catch is CancellationError {
                 return
             } catch let error as OpenCodeGoAPIError {
-                if case let .http(status) = error, status == 401 || status == 403 || status == 404 {
-                    return
+                if case let .http(status) = error, status == 401 || status == 403 {
+                    previous = nil
                 }
                 try? await sleep(seconds: OpenCodeGoRecoveryPlanner.normalRecheckInterval)
             } catch {
