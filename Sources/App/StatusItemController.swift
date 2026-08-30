@@ -86,6 +86,32 @@ private extension UsageWindowKind {
     }
 }
 
+struct QuotaRecoveryToastLayout {
+    static let margin: CGFloat = 8
+    static let verticalGap: CGFloat = 7
+    static let revealOffset: CGFloat = 6
+
+    static func targetOrigin(
+        anchor: CGRect,
+        visibleFrame: CGRect,
+        panelSize: CGSize
+    ) -> CGPoint {
+        let idealX = anchor.midX - panelSize.width / 2
+        let minX = visibleFrame.minX + margin
+        let unclampedMaxX = visibleFrame.maxX - panelSize.width - margin
+        let maxX = max(minX, unclampedMaxX)
+        let x = min(max(idealX, minX), maxX)
+        let y = max(
+            visibleFrame.minY + margin,
+            anchor.minY - panelSize.height - verticalGap)
+        return CGPoint(x: x, y: y)
+    }
+
+    static func initialOrigin(target: CGPoint) -> CGPoint {
+        CGPoint(x: target.x, y: target.y + revealOffset)
+    }
+}
+
 @MainActor
 private final class QuotaRecoveryToastController {
     private struct Toast {
@@ -169,30 +195,27 @@ private final class QuotaRecoveryToastController {
 
         let anchorInWindow = anchorView.convert(anchorView.bounds, to: nil)
         let anchorOnScreen = anchorWindow.convertToScreen(anchorInWindow)
-        positionPanel(below: anchorOnScreen, on: anchorWindow.screen)
+        let visibleFrame = anchorWindow.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? .zero
+        let targetOrigin = QuotaRecoveryToastLayout.targetOrigin(
+            anchor: anchorOnScreen,
+            visibleFrame: visibleFrame,
+            panelSize: panel.frame.size)
+        panel.setFrameOrigin(QuotaRecoveryToastLayout.initialOrigin(target: targetOrigin))
 
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1
+            panel.animator().setFrameOrigin(targetOrigin)
         }
 
         let item = DispatchWorkItem { [weak self] in self?.dismissCurrent() }
         dismissWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.2, execute: item)
-    }
-
-    private func positionPanel(below anchor: NSRect, on screen: NSScreen?) {
-        let visibleFrame = screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-        let size = panel.frame.size
-        let margin: CGFloat = 8
-        let idealX = anchor.midX - size.width / 2
-        let minX = visibleFrame.minX + margin
-        let maxX = visibleFrame.maxX - size.width - margin
-        let x = min(max(idealX, minX), maxX)
-        let y = max(visibleFrame.minY + margin, anchor.minY - size.height - 7)
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     private func dismissCurrent() {
