@@ -14,6 +14,17 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot.fetchedAt, Date(timeIntervalSince1970: 9))
     }
 
+    func testMapsMonthlyWindowForGoPlan() throws {
+        let json = #"{"plan_type":"go","rate_limit":{"primary_window":{"used_percent":10,"reset_at":1790494198,"limit_window_seconds":2592000},"secondary_window":null}}"#
+
+        let snapshot = try CodexUsageParser.parse(data: Data(json.utf8))
+
+        XCTAssertEqual(snapshot.provider, .codex)
+        XCTAssertEqual(snapshot.planName, "Go")
+        XCTAssertEqual(snapshot.windows.map(\.kind), [.monthly])
+        XCTAssertEqual(snapshot.windows.map(\.usedPercent), [10])
+    }
+
     func testRejectsUnknownDurationsAndInvalidPercentages() {
         let unknown = #"{"rate_limit":{"primary_window":{"used_percent":10,"reset_at":1,"limit_window_seconds":32400}}}"#
         let invalid = #"{"rate_limit":{"primary_window":{"used_percent":101,"reset_at":1,"limit_window_seconds":18000}}}"#

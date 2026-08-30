@@ -28,12 +28,17 @@ enum CodexUsageParser {
         switch seconds {
         case 18_000: .fiveHour
         case 604_800: .weekly
+        case 2_592_000: .monthly
         default: nil
         }
     }
 
     private static func label(_ kind: UsageWindowKind) -> String {
-        kind == .fiveHour ? "5-hour" : "Weekly"
+        switch kind {
+        case .fiveHour: "5-hour"
+        case .weekly: "Weekly"
+        case .monthly: "Monthly"
+        }
     }
 
     private struct Response: Decodable {
