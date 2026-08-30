@@ -169,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 })
 
         case .antigravity:
-            return AntigravityProvider()
+            return AntigravityStatusLineProvider(fallback: AntigravityProvider())
 
         case .copilot:
             return secretBackedProvider(
@@ -308,8 +308,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showAntigravityAccountInfo() {
         let alert = NSAlert()
-        alert.messageText = "Antigravity uses the official local session"
-        alert.informativeText = "Start Antigravity and sign in there, then Refresh in AIUsage. AIUsage does not perform Google OAuth or direct Antigravity quota requests. Multiple Antigravity accounts are disabled until the official CLI status-line integration is available in AIUsage."
+        alert.messageText = "Antigravity uses official local interfaces"
+        alert.informativeText = "AIUsage first reads the Antigravity CLI custom status-line cache when configured. Otherwise it falls back to the running Antigravity desktop local session. AIUsage does not create Google OAuth credentials or call Google's remote quota endpoint. See README for the /statusline setup command."
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Open Antigravity")
         if alert.runModal() == .alertSecondButtonReturn,
@@ -550,5 +550,135 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = title
         alert.informativeText = error.localizedDescription
         alert.runModal()
+    }
+}
+
+@MainActor
+final class AntigravityStatusLineProvider: UsageProvider {
+    let id: ProviderID = .antigravity
+
+    private let fallback: any UsageProvider
+    private let fileManager: FileManager
+
+    init(fallback: any UsageProvider, fileManager: FileManager = .default) {
+        self.fallback = fallback
+        self.fileManager = fileManager
+    }
+
+    func fetch() async throws -> ProviderSnapshot {
+        if let cached = try? Self.loadCachedSnapshot(fileManager: fileManager) {
+            return cached
+        }
+
+        do {
+            return try await fallback.fetch()
+        } catch {
+            throw MajorProviderError.authentication(
+                "Antigravity usage is unavailable. Configure the official CLI /statusline bridge or open and sign in to the Antigravity desktop app, then Refresh.")
+        }
+    }
+
+    func cancelActiveFetch() {
+        fallback.cancelActiveFetch()
+    }
+
+    static func loadCachedSnapshot(
+        fileManager: FileManager = .default
+    ) throws -> ProviderSnapshot? {
+        let url = cacheURL(fileManager: fileManager)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        let attributes = try? fileManager.attributesOfItem(atPath: url.path)
+        let modifiedAt = attributes?[.modificationDate] as? Date ?? Date()
+        return try parseStatusLinePayload(data: data, fetchedAt: modifiedAt)
+    }
+
+    static func parseStatusLinePayload(
+        data: Data,
+        fetchedAt: Date = Date()
+    ) throws -> ProviderSnapshot {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (root["product"] as? String)?.lowercased() == "antigravity",
+              let quota = root["quota"] as? [String: Any] else {
+            throw MajorProviderError.invalidResponse(
+                "Antigravity status-line cache did not contain a recognized quota payload.")
+        }
+
+        var windows: [UsageWindow] = []
+        for (key, rawValue) in quota {
+            guard let value = rawValue as? [String: Any],
+                  let remaining = number(value["remaining_fraction"]),
+                  remaining.isFinite,
+                  (0...1).contains(remaining),
+                  let descriptor = quotaDescriptor(key) else { continue }
+
+            let resetTime = value["reset_time"] as? String
+            let resetSeconds = number(value["reset_in_seconds"])
+            let resetsAt = MajorProviderHTTP.isoDate(resetTime)
+                ?? resetSeconds.map { fetchedAt.addingTimeInterval($0) }
+            windows.append(try UsageWindow(
+                id: "antigravity-statusline-\(key)",
+                kind: descriptor.kind,
+                label: descriptor.label,
+                compactLabel: descriptor.compactLabel,
+                usedPercent: (1 - remaining) * 100,
+                resetsAt: resetsAt,
+                resetDescription: nil))
+        }
+
+        guard !windows.isEmpty else {
+            throw MajorProviderError.invalidResponse(
+                "Antigravity status-line cache contained no recognized quota windows.")
+        }
+
+        let plan = (root["plan_tier"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return ProviderSnapshot(
+            provider: .antigravity,
+            planName: plan?.isEmpty == false ? plan : nil,
+            windows: windows,
+            fetchedAt: fetchedAt)
+    }
+
+    private static func cacheURL(fileManager: FileManager) -> URL {
+        fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/AIUsage", isDirectory: true)
+            .appendingPathComponent("antigravity-status.json")
+    }
+
+    private static func quotaDescriptor(
+        _ key: String
+    ) -> (kind: UsageWindowKind, label: String, compactLabel: String)? {
+        let normalized = key.lowercased()
+        let kind: UsageWindowKind
+        let cadenceLabel: String
+        let cadenceCompact: String
+        if normalized.contains("weekly") || normalized.contains("week") {
+            kind = .weekly
+            cadenceLabel = "Weekly"
+            cadenceCompact = "W"
+        } else if normalized.contains("5h") || normalized.contains("5-hour") || normalized.contains("session") {
+            kind = .fiveHour
+            cadenceLabel = "5-hour"
+            cadenceCompact = "5"
+        } else {
+            return nil
+        }
+
+        if normalized.contains("gemini") {
+            return (kind, "Gemini \(cadenceLabel)", "G\(cadenceCompact)")
+        }
+        if normalized.contains("claude") || normalized.contains("gpt")
+            || normalized.contains("third") || normalized.contains("3p") {
+            return (kind, "Claude / GPT \(cadenceLabel)", "C\(cadenceCompact)")
+        }
+        return nil
+    }
+
+    private static func number(_ raw: Any?) -> Double? {
+        if let value = raw as? Double { return value }
+        if let value = raw as? NSNumber { return value.doubleValue }
+        if let value = raw as? String { return Double(value) }
+        return nil
     }
 }
