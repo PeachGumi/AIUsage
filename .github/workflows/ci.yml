@@ -46,8 +46,10 @@ jobs:
             fi
           done < <(find Sources Tests -type f -name '*.swift' -print | sort)
           exit "$missing"
-      - name: Validate release script
-        run: bash -n Scripts/build_release.sh
+      - name: Validate shell scripts
+        run: |
+          bash -n Scripts/build_release.sh
+          bash -n Scripts/antigravity_statusline.sh
       - name: Unit tests
         run: |
           set -o pipefail
