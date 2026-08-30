@@ -16,7 +16,7 @@
 > AIUsageは各Providerの公式アプリ・公式SDKではありません。使用量取得には、公式クライアントのローカル状態や、安定性が保証されていないusage endpoint / ローカルinterfaceを利用する統合があります。Provider側の変更により一時的に取得できなくなる可能性があります。
 
 > [!WARNING]
-> 実アカウントで検証済みなのは **OpenCode Go / OpenAI Codexのみ** です。Qwen Cloud、Claude、Antigravity、GitHub Copilot、Cursor、Z.AI、Kimi CodeはExperimentalです。表示値は公式dashboardと照合してください。
+> 実アカウントで検証済みなのは **OpenCode Go / OpenAI Codex / GitHub Copilot / Antigravity** です。Qwen Cloud、Claude、Cursor、Z.AI、Kimi CodeはExperimentalです。表示値は公式dashboardと照合してください。
 
 ## 特徴
 
@@ -112,7 +112,7 @@ AIUsageでは統合種別とカードを分けています。
 
 ### Antigravity
 
-Antigravityは現在Experimentalで、**1アカウントのみ**対応しています。取得経路は次の優先順です。
+Antigravityは**1アカウントのみ**対応しています。取得経路は次の優先順です。
 
 1. Antigravity CLIが公式custom status-line scriptへ渡すJSON payloadを、AIUsage用bridgeでローカルキャッシュして読み取る
 2. キャッシュがない場合は、従来どおり実行中のAntigravity desktop local sessionを利用する
@@ -171,8 +171,8 @@ Antigravityの2アカウント目は現時点では追加できません。statu
 | **OpenAI Codex** | 検証済み | 5-hour / Weekly | defaultはCodex CLI OAuth、追加カードは別`auth.json` |
 | **Qwen Cloud** | Experimental | 5-hour / Weekly | AIUsage内Web login。カードごとにWebKit分離 |
 | **Claude** | Experimental | 5-hour / Weekly | defaultはClaude Code OAuth、追加カードは別credential file |
-| **Antigravity** | Experimental | Gemini / Claude・GPTの5-hour / Weekly | 公式CLI status-line cache優先、desktop local sessionへfallback。現在1カードのみ |
-| **GitHub Copilot** | Experimental | Monthly quota | defaultはGitHub CLI/env、追加カードはKeychain token |
+| **Antigravity** | 検証済み | Gemini / Claude・GPTの5-hour / Weekly | 公式CLI status-line cache優先、desktop local sessionへfallback。現在1カードのみ |
+| **GitHub Copilot** | 検証済み | Monthly quota | defaultはGitHub CLI/env、追加カードはKeychain token |
 | **Cursor** | Experimental | Monthly usage pools | defaultはCursor.app、追加カードはKeychain token |
 | **Z.AI GLM** | Experimental | 5-hour / Weekly | UUID別Coding Plan API key |
 | **Kimi Code** | Experimental | 5-hour / Weekly | defaultはKimi CLI/env、追加カードはKeychain API key |
@@ -180,7 +180,7 @@ Antigravityの2アカウント目は現時点では追加できません。statu
 Experimental統合は未知のレスポンス形状を0%として推測せず、エラーとしてfail closedします。
 
 > [!NOTE]
-> **Experimental Providerの実アカウント検証・修正に協力してくださる方を募集しています。** Qwen Cloud、Claude、Antigravity、GitHub Copilot、Cursor、Z.AI、Kimi Codeを利用している方から、公式dashboardとの照合結果をもとにしたfixture / parser / integration修正のPull Requestを歓迎します。OAuth token、API key、Cookie、account ID、workspace ID、認証済みAPIレスポンス全文などの秘密情報はIssueやPull Requestへ含めないでください。
+> **Experimental Providerの実アカウント検証・修正に協力してくださる方を募集しています。** Qwen Cloud、Claude、Cursor、Z.AI、Kimi Codeを利用している方から、公式dashboardとの照合結果をもとにしたfixture / parser / integration修正のPull Requestを歓迎します。OAuth token、API key、Cookie、account ID、workspace ID、認証済みAPIレスポンス全文などの秘密情報はIssueやPull Requestへ含めないでください。
 
 ## 表示と更新
 
@@ -295,7 +295,7 @@ xcodebuild build \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES
 ```
 
-CIではSwift sourceのXcode project登録漏れ、release scriptのshell構文、compiler warningも検査します。
+CIではSwift sourceのXcode project登録漏れ、shell script構文、compiler warningも検査します。
 
 ### Live Tests
 
