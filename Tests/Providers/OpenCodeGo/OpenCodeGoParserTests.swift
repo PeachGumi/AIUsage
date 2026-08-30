@@ -81,7 +81,8 @@ final class OpenCodeGoParserTests: XCTestCase {
         XCTAssertEqual(snapshot.provider, .openCodeGo)
         XCTAssertEqual(snapshot.windows.map(\.kind), [.fiveHour, .weekly, .monthly])
         XCTAssertEqual(snapshot.windows.map(\.usedPercent), [0.1, 20, 30])
-        XCTAssertEqual(snapshot.windows.first?.remainingPercent, 99.9, accuracy: 0.000_001)
+        let remaining = try XCTUnwrap(snapshot.windows.first?.remainingPercent)
+        XCTAssertEqual(remaining, 99.9, accuracy: 0.000_001)
         XCTAssertEqual(snapshot.fetchedAt, now)
         XCTAssertEqual(
             snapshot.windows.first?.resetsAt,
