@@ -235,3 +235,50 @@ final class QuotaRecoveryDetectorTests: XCTestCase {
         }
     }
 }
+
+final class QuotaRecoveryToastLayoutTests: XCTestCase {
+    func testCentersToastBelowAnchorWhenThereIsRoom() {
+        let origin = QuotaRecoveryToastLayout.targetOrigin(
+            anchor: CGRect(x: 900, y: 1060, width: 100, height: 24),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            panelSize: CGSize(width: 330, height: 72))
+
+        XCTAssertEqual(origin.x, 785, accuracy: 0.001)
+        XCTAssertEqual(origin.y, 981, accuracy: 0.001)
+    }
+
+    func testClampsToastInsideLeftEdge() {
+        let origin = QuotaRecoveryToastLayout.targetOrigin(
+            anchor: CGRect(x: 0, y: 1060, width: 40, height: 24),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            panelSize: CGSize(width: 330, height: 72))
+
+        XCTAssertEqual(origin.x, 8, accuracy: 0.001)
+    }
+
+    func testClampsToastInsideRightEdge() {
+        let origin = QuotaRecoveryToastLayout.targetOrigin(
+            anchor: CGRect(x: 1890, y: 1060, width: 30, height: 24),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+            panelSize: CGSize(width: 330, height: 72))
+
+        XCTAssertEqual(origin.x, 1582, accuracy: 0.001)
+    }
+
+    func testClampsToastAboveBottomEdge() {
+        let origin = QuotaRecoveryToastLayout.targetOrigin(
+            anchor: CGRect(x: 500, y: 50, width: 80, height: 24),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1280, height: 720),
+            panelSize: CGSize(width: 330, height: 72))
+
+        XCTAssertEqual(origin.y, 8, accuracy: 0.001)
+    }
+
+    func testRevealStartsCloserToMenuBarThenSlidesDown() {
+        let target = CGPoint(x: 400, y: 900)
+        let initial = QuotaRecoveryToastLayout.initialOrigin(target: target)
+
+        XCTAssertEqual(initial.x, target.x, accuracy: 0.001)
+        XCTAssertEqual(initial.y, target.y + 6, accuracy: 0.001)
+    }
+}
