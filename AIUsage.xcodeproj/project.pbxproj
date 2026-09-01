@@ -26,6 +26,7 @@
 		5F3B6C2DBD40DCDF686A11BA /* UsageWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9565D9B97E88C7D69FA7EBB /* UsageWindow.swift */; };
 		60EA1742A19FC982AC11F959 /* MajorProviders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB6042AC5DA0B68A24A576C /* MajorProviders.swift */; };
 		6169FE27AFC2B77B47D35942 /* AIUsageApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F627B811B8A1C61B2F57AFF3 /* AIUsageApp.swift */; };
+		61923AEAD4C1B594B29910DB /* LaunchAtLoginControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 522DB03C6800EB787F55A9EF /* LaunchAtLoginControllerTests.swift */; };
 		6318F99E82BDA7E497C6F28D /* LiveProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00D3689F4FD2E0BCCDBFB58 /* LiveProviderTests.swift */; };
 		67656838C9726098921E42A7 /* ProviderSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18C08C1F408DB5F63451F88 /* ProviderSnapshot.swift */; };
 		6AE364AEB36E136B9640F258 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AE9FCBE6F9DFFEB7D5A370A /* AppDelegate.swift */; };
@@ -43,6 +44,7 @@
 		AA7EE4064D003E5D143B1362 /* UsageSeverityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 006B16A817131B36908DE7D0 /* UsageSeverityTests.swift */; };
 		AC416E0742FB6591E493A924 /* CodexAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBCB54C5425FEE9973E9D0C6 /* CodexAuth.swift */; };
 		AD2EC7D1DF33940EA6A68E30 /* CodexUsageParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B2E7B2C208DF76636C49AB7 /* CodexUsageParserTests.swift */; };
+		B1CCA1A2072D9C1F53CA7F47 /* LaunchAtLoginController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB290D9E13D0D592EBA714B3 /* LaunchAtLoginController.swift */; };
 		B98747BEFA127C62B641673A /* OpenCodeGoProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CE1439CE8B631AF31470E9A /* OpenCodeGoProvider.swift */; };
 		CAEC2ED8E8614EC4DF10BBDD /* UsageSeverity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9D0F0E0EEA15BFACFD37D90 /* UsageSeverity.swift */; };
 		ED759E1C57B27160B9C14326 /* CodexProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66A459E83A6331DCF0D767F /* CodexProviderTests.swift */; };
@@ -71,6 +73,7 @@
 		38B24110A33BF7F2AAC0FE9A /* SettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreTests.swift; sourceTree = "<group>"; };
 		42FE90A107F232E296836F34 /* QwenProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenProviderTests.swift; sourceTree = "<group>"; };
 		509768DE0B7E27601F107931 /* WebLoginWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebLoginWindowController.swift; sourceTree = "<group>"; };
+		522DB03C6800EB787F55A9EF /* LaunchAtLoginControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginControllerTests.swift; sourceTree = "<group>"; };
 		5246E35C7133405BC4BEC81D /* QwenUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenUsageParser.swift; sourceTree = "<group>"; };
 		5B2E7B2C208DF76636C49AB7 /* CodexUsageParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsageParserTests.swift; sourceTree = "<group>"; };
 		5BB6042AC5DA0B68A24A576C /* MajorProviders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MajorProviders.swift; sourceTree = "<group>"; };
@@ -87,6 +90,7 @@
 		A64DD72CA85D76BA7D41FAD9 /* QwenCookieRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenCookieRepository.swift; sourceTree = "<group>"; };
 		B66A459E83A6331DCF0D767F /* CodexProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexProviderTests.swift; sourceTree = "<group>"; };
 		BA94B52F2B0B8D95CE6388FB /* UsageWindowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageWindowTests.swift; sourceTree = "<group>"; };
+		BB290D9E13D0D592EBA714B3 /* LaunchAtLoginController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginController.swift; sourceTree = "<group>"; };
 		C04968A6DC54ADF0CB3FD180 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CBCB54C5425FEE9973E9D0C6 /* CodexAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAuth.swift; sourceTree = "<group>"; };
 		CD3DF2A0D600E39C03692805 /* AIUsageTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AIUsageTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -218,6 +222,7 @@
 		A6C3D6BCABAEA7457B386BEF /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				BB290D9E13D0D592EBA714B3 /* LaunchAtLoginController.swift */,
 				21F3F4052F461135272C44C6 /* MenuBarPresentation.swift */,
 				F18C08C1F408DB5F63451F88 /* ProviderSnapshot.swift */,
 				280FEE8A34795CB5B1E0D86F /* SettingsStore.swift */,
@@ -242,6 +247,7 @@
 		BFC041B556F3516259F05492 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				522DB03C6800EB787F55A9EF /* LaunchAtLoginControllerTests.swift */,
 				FC9A0C207D6AB5AB978DC649 /* MenuBarPresentationTests.swift */,
 				38B24110A33BF7F2AAC0FE9A /* SettingsStoreTests.swift */,
 				7823140026F38B01994AFBE7 /* UsageCoordinatorTests.swift */,
@@ -386,6 +392,7 @@
 				F997CD14EC3D3E4FC83C61BF /* CodexAuthTests.swift in Sources */,
 				ED759E1C57B27160B9C14326 /* CodexProviderTests.swift in Sources */,
 				AD2EC7D1DF33940EA6A68E30 /* CodexUsageParserTests.swift in Sources */,
+				61923AEAD4C1B594B29910DB /* LaunchAtLoginControllerTests.swift in Sources */,
 				6318F99E82BDA7E497C6F28D /* LiveProviderTests.swift in Sources */,
 				78030D9889848D53850458A0 /* LoginSuccessRulesTests.swift in Sources */,
 				286825C5BC1166590FC4598F /* MajorProviderTests.swift in Sources */,
@@ -412,6 +419,7 @@
 				5BAFE91F6367A49A4975F30A /* CodexProvider.swift in Sources */,
 				9D76D87A9B1AE91BF9956B95 /* CodexUsageParser.swift in Sources */,
 				0200C47ED947AFF8A09A084D /* DashboardView.swift in Sources */,
+				B1CCA1A2072D9C1F53CA7F47 /* LaunchAtLoginController.swift in Sources */,
 				60EA1742A19FC982AC11F959 /* MajorProviders.swift in Sources */,
 				86C4EBDAA0F7087D5F1470BE /* MenuBarPresentation.swift in Sources */,
 				0FD35B5E769A922DF9694FB7 /* OpenCodeGoParser.swift in Sources */,

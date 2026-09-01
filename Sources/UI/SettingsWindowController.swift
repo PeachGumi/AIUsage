@@ -7,7 +7,7 @@ final class SettingsWindowController: NSWindowController {
         let content = SettingsView(settings: settings)
         let hosting = NSHostingView(rootView: content)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 350),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
@@ -26,11 +26,23 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
+@MainActor
 private struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
+    @StateObject private var launchAtLogin = LaunchAtLoginController()
 
     var body: some View {
         Form {
+            Section("General") {
+                Toggle("Launch AIUsage at login", isOn: Binding(
+                    get: { launchAtLogin.isEnabled },
+                    set: { launchAtLogin.setEnabled($0) }))
+                if let error = launchAtLogin.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
             Section("Menu Bar") {
                 if settings.registeredProviders.isEmpty {
                     LabeledContent("Displayed account", value: "No provider accounts added")
@@ -55,6 +67,7 @@ private struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 430, height: 280)
+        .frame(width: 430, height: 350)
+        .onAppear { launchAtLogin.refresh() }
     }
 }

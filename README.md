@@ -68,7 +68,7 @@ build/dist/AIUsage-macOS.zip.sha256
 5. **Rename…** で `Personal` / `Work` などのローカル表示名を付けられます。
 6. カードをクリックすると、そのアカウントがメニューバー表示へ固定されます。
 7. 左端のドラッグハンドルで並び替えられます。
-8. **Settings** からRemaining / Usedを切り替えられます。
+8. **Settings** からRemaining / Usedの切り替えと、ログイン時の自動起動を設定できます。
 
 登録済みカードだけが起動時・定期更新・Popover表示時・Refresh Allの対象です。バックグラウンド更新間隔は5分です。
 
