@@ -63,10 +63,10 @@ enum OpenCodeGoParser {
         guard let text else { throw OpenCodeGoError.invalidResponse }
         let normalized = text.replacingOccurrences(of: "%", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Double(normalized), value.isFinite, (0...100).contains(value) else {
+        guard let value = Double(normalized), value.isFinite, value >= 0 else {
             throw OpenCodeGoError.invalidResponse
         }
-        return value
+        return min(value, 100)
     }
 
     private static func pageError(_ response: Response) -> OpenCodeGoError {

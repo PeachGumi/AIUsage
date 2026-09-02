@@ -64,12 +64,24 @@ final class OpenCodeGoParserTests: XCTestCase {
         XCTAssertEqual(result.snapshot.windows.map(\.usedPercent), [11, 22, 33])
     }
 
-    func testRejectsMalformedAndOutOfRangePercentages() {
+    func testClampsOveragePercentagesAtFullyUsed() throws {
+        let json = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"5時間利用量","value":"102.5%"},{"label":"週間利用量","value":"42.3%"},{"label":"月間利用量","value":"67.9%"}],"promo":false,"other":false,"useBalance":false}"#
+
+        let result = try OpenCodeGoParser.parse(jsonText: json)
+
+        XCTAssertEqual(result.snapshot.windows.map(\.usedPercent), [100, 42.3, 67.9])
+        let remaining = result.snapshot.windows.map(\.remainingPercent)
+        XCTAssertEqual(remaining[0], 0, accuracy: 0.000_001)
+        XCTAssertEqual(remaining[1], 57.7, accuracy: 0.000_001)
+        XCTAssertEqual(remaining[2], 32.1, accuracy: 0.000_001)
+    }
+
+    func testRejectsMalformedAndNegativePercentages() {
         let malformed = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"value":"0.2%"},{"value":"oops"},{"value":"32.1%"}]}"#
-        let outOfRange = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"value":"0.2%"},{"value":"0.1%"},{"value":"101%"}]}"#
+        let negative = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"value":"0.2%"},{"value":"0.1%"},{"value":"-1%"}]}"#
 
         XCTAssertThrowsError(try OpenCodeGoParser.parse(jsonText: malformed))
-        XCTAssertThrowsError(try OpenCodeGoParser.parse(jsonText: outOfRange))
+        XCTAssertThrowsError(try OpenCodeGoParser.parse(jsonText: negative))
     }
 
     func testAPIUsageParserProvidesUsedPercentAndResetDates() throws {
