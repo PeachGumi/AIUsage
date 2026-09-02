@@ -34,6 +34,17 @@ final class LaunchAtLoginControllerTests: XCTestCase {
         XCTAssertFalse(controller.isEnabled)
         XCTAssertNotNil(controller.errorMessage)
     }
+
+    func testUnregistrationFailureKeepsActualStateAndExposesError() {
+        let service = FakeLaunchAtLoginService(isEnabled: true, unregisterError: TestError.failed)
+        let controller = LaunchAtLoginController(service: service)
+
+        controller.setEnabled(false)
+
+        XCTAssertEqual(service.unregisterCallCount, 1)
+        XCTAssertTrue(controller.isEnabled)
+        XCTAssertNotNil(controller.errorMessage)
+    }
 }
 
 private final class FakeLaunchAtLoginService: LaunchAtLoginService {
@@ -41,10 +52,12 @@ private final class FakeLaunchAtLoginService: LaunchAtLoginService {
     var registerCallCount = 0
     var unregisterCallCount = 0
     var registerError: Error?
+    var unregisterError: Error?
 
-    init(isEnabled: Bool = false, registerError: Error? = nil) {
+    init(isEnabled: Bool = false, registerError: Error? = nil, unregisterError: Error? = nil) {
         self.isEnabled = isEnabled
         self.registerError = registerError
+        self.unregisterError = unregisterError
     }
 
     func register() throws {
@@ -55,6 +68,7 @@ private final class FakeLaunchAtLoginService: LaunchAtLoginService {
 
     func unregister() throws {
         unregisterCallCount += 1
+        if let unregisterError { throw unregisterError }
         isEnabled = false
     }
 }

@@ -53,9 +53,10 @@ enum OpenCodeGoParser {
 
     private static func kind(from label: String?) -> UsageWindowKind? {
         guard let label = label?.lowercased() else { return nil }
-        if label.contains("hour") && (label.contains("5") || label.contains("five")) { return .fiveHour }
-        if label.contains("week") { return .weekly }
-        if label.contains("month") { return .monthly }
+        if (label.contains("hour") && (label.contains("5") || label.contains("five")))
+            || (label.contains("時間") && label.contains("5")) { return .fiveHour }
+        if label.contains("week") || label.contains("週") { return .weekly }
+        if label.contains("month") || label.contains("月") { return .monthly }
         return nil
     }
 

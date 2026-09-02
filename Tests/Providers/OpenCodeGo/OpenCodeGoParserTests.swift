@@ -22,6 +22,15 @@ final class OpenCodeGoParserTests: XCTestCase {
         XCTAssertEqual(result.snapshot.windows.map(\.usedPercent), [11, 22, 33])
     }
 
+    func testUsesJapaneseLabelsWhenUpstreamReordersUsageCards() throws {
+        let json = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"月間利用量","value":"67.9%"},{"label":"5時間利用量","value":"102.5%"},{"label":"週間利用量","value":"42.3%"}],"promo":false,"other":false,"useBalance":false}"#
+
+        let result = try OpenCodeGoParser.parse(jsonText: json)
+
+        XCTAssertEqual(result.snapshot.windows.map(\.kind), [.fiveHour, .weekly, .monthly])
+        XCTAssertEqual(result.snapshot.windows.map(\.usedPercent), [100, 42.3, 67.9])
+    }
+
     func testParsedNinetyNinePointNineRemainingTransitionTriggersRecovery() throws {
         let partialJSON = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"5-hour","value":"0.1%"},{"label":"Weekly","value":"20%"},{"label":"Monthly","value":"30%"}],"promo":false,"other":false,"useBalance":false}"#
         let recoveredJSON = #"{"url":"https://opencode.ai/workspace/wrk_example/go","items":[{"label":"5-hour","value":"0%"},{"label":"Weekly","value":"20%"},{"label":"Monthly","value":"30%"}],"promo":false,"other":false,"useBalance":false}"#
