@@ -3,6 +3,24 @@ import XCTest
 
 @MainActor
 final class QwenProviderTests: XCTestCase {
+    func testHTTPAuthenticationFailuresRequireSignInButTransientFailuresDoNot() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [QwenStatusURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+
+        for status in [401, 403, 429, 500, 503] {
+            let provider = QwenProvider(session: session, cookieSource: { _ in "status=\(status)" })
+            do {
+                _ = try await provider.fetch()
+                XCTFail("Expected HTTP failure for \(status)")
+            } catch let error as QwenUsageError {
+                XCTAssertEqual(error, .http(status))
+                XCTAssertEqual(error.requiresAuthentication, status == 401 || status == 403)
+            }
+        }
+    }
+
     func testGatewayRequestEncodesCredentialsAndJSONAsFormData() throws {
         let request = try QwenProvider.makeGatewayRequest(
             api: "example.api/path",
@@ -99,4 +117,18 @@ final class QwenProviderTests: XCTestCase {
         XCTAssertFalse(QwenCookieRepository.isValidHeaderShape("session=abc\rInjected=value"))
         XCTAssertFalse(QwenCookieRepository.isValidHeaderShape("=value"))
     }
+}
+
+private final class QwenStatusURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let status = Int(request.value(forHTTPHeaderField: "Cookie")?.dropFirst("status=".count) ?? "") ?? 500
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

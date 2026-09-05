@@ -13,6 +13,7 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     private let hiddenWindow: NSWindow
     private var continuation: CheckedContinuation<ProviderSnapshot, Error>?
     private var activeGeneration = 0
+    private var activeNavigation: WKNavigation?
     private var scrapeTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
     private var scrapeRetries = 0
@@ -26,12 +27,13 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
 
     init(
         workspaceStore: OpenCodeWorkspaceStore = OpenCodeWorkspaceStore(),
-        dataStore: WKWebsiteDataStore = .default())
+        dataStore: WKWebsiteDataStore = .default(),
+        injectedWebView: WKWebView? = nil)
     {
         self.workspaceStore = workspaceStore
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
-        webView = WKWebView(
+        webView = injectedWebView ?? WKWebView(
             frame: NSRect(x: 0, y: 0, width: 1000, height: 800),
             configuration: configuration)
         hiddenWindow = NSWindow(
@@ -53,7 +55,7 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
         return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
             self.startTimeout(generation: generation)
-            self.webView.load(URLRequest(
+            self.activeNavigation = self.webView.load(URLRequest(
                 url: self.startURL,
                 cachePolicy: .reloadIgnoringLocalCacheData,
                 timeoutInterval: 30))
@@ -61,6 +63,7 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     }
 
     func cancelActiveFetch() {
+        activeNavigation = nil
         webView.stopLoading()
         complete(generation: activeGeneration, .failure(OpenCodeGoError.navigation("fetch cancelled")))
     }
@@ -103,7 +106,7 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
                     return
                 }
                 if let redirect = Self.workspaceRedirect(from: json), redirect != self.webView.url {
-                    self.webView.load(URLRequest(url: redirect, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+                    self.activeNavigation = self.webView.load(URLRequest(url: redirect, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
                     return
                 }
                 do {
@@ -130,6 +133,7 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
             return
         }
         self.continuation = nil
+        activeNavigation = nil
         timeoutTask?.cancel()
         timeoutTask = nil
         scrapeTask?.cancel()
@@ -212,14 +216,17 @@ extension OpenCodeGoProvider: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard let navigation, navigation === activeNavigation, continuation != nil else { return }
         scheduleScrape(generation: activeGeneration)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard let navigation, navigation === activeNavigation, continuation != nil else { return }
         complete(generation: activeGeneration, .failure(OpenCodeGoError.navigation(error.localizedDescription)))
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard let navigation, navigation === activeNavigation, continuation != nil else { return }
         complete(generation: activeGeneration, .failure(OpenCodeGoError.navigation(error.localizedDescription)))
     }
 }

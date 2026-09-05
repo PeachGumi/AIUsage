@@ -1,7 +1,20 @@
 import XCTest
+import AppKit
+import Combine
 @testable import AIUsage
 
 final class LoginSuccessRulesTests: XCTestCase {
+    @MainActor
+    func testAutomaticRefreshReceivesWakeFromWorkspaceAndActivationFromApplication() {
+        var received: [Notification.Name] = []
+        let subscription = AppDelegate.refreshNotifications.sink { received.append($0.name) }
+        defer { subscription.cancel() }
+
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+
+        XCTAssertEqual(received, [NSWorkspace.didWakeNotification, NSApplication.didBecomeActiveNotification])
+    }
     func testOpenCodeRequiresConsoleOrWorkspacePageOnExpectedHost() {
         XCTAssertTrue(LoginSuccessRules.isSuccess(
             provider: .openCodeGo,

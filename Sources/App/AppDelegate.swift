@@ -27,16 +27,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in await self?.coordinator.refreshAll() }
         }
 
-        let center = NotificationCenter.default
-        Publishers.Merge(
-            center.publisher(for: NSApplication.didBecomeActiveNotification),
-            center.publisher(for: NSWorkspace.didWakeNotification))
+        Self.refreshNotifications
             .sink { [weak self] _ in
                 Task { @MainActor in await self?.coordinator.refreshIfStale(olderThan: 120) }
             }
             .store(in: &subscriptions)
 
         Task { await coordinator.refreshAll() }
+    }
+
+    static var refreshNotifications: AnyPublisher<Notification, Never> {
+        Publishers.Merge(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification),
+            NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification))
+            .eraseToAnyPublisher()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -1,4 +1,5 @@
 import XCTest
+import WebKit
 @testable import AIUsage
 
 final class OpenCodeGoParserTests: XCTestCase {
@@ -251,4 +252,74 @@ final class OpenCodeGoParserTests: XCTestCase {
             ],
             fetchedAt: now)
     }
+}
+
+@MainActor
+final class OpenCodeGoNavigationTests: XCTestCase {
+    func testOldNavigationFailuresCannotCompleteReplacementFetch() async throws {
+        for provisional in [true, false] {
+            let suite = "AIUsageNavigationTests.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let configuration = WKWebViewConfiguration()
+            configuration.websiteDataStore = .nonPersistent()
+            let webView = NavigationStubWebView(frame: .zero, configuration: configuration)
+            let provider = OpenCodeGoProvider(
+                workspaceStore: OpenCodeWorkspaceStore(defaults: defaults, allowsLegacyMigration: false),
+                dataStore: .nonPersistent(),
+                injectedWebView: webView)
+            defer { provider.cancelActiveFetch() }
+
+            let first = Task { try? await provider.fetch() }
+            for _ in 0..<400 where webView.navigations.isEmpty { await Task.yield() }
+            let old = try XCTUnwrap(webView.navigations.first)
+            provider.cancelActiveFetch()
+            _ = await first.value
+
+            var replacementFinished = false
+            let second = Task { () -> String in
+                defer { replacementFinished = true }
+                do {
+                    _ = try await provider.fetch()
+                    return "unexpected success"
+                } catch {
+                    return error.localizedDescription
+                }
+            }
+            for _ in 0..<400 where webView.navigations.count < 2 { await Task.yield() }
+            XCTAssertEqual(webView.navigations.count, 2)
+            let current = try XCTUnwrap(webView.navigations.last)
+            if provisional {
+                provider.webView(webView, didFailProvisionalNavigation: old, withError: URLError(.cancelled))
+            } else {
+                provider.webView(webView, didFail: old, withError: URLError(.cancelled))
+            }
+            for _ in 0..<10 { await Task.yield() }
+            XCTAssertFalse(replacementFinished, "An old navigation failure completed the replacement fetch")
+
+            provider.webView(webView, didFail: current, withError: URLError(.timedOut))
+            let result = await second.value
+            XCTAssertEqual(result, OpenCodeGoError.navigation(URLError(.timedOut).localizedDescription).localizedDescription)
+        }
+    }
+}
+
+@MainActor
+private final class NavigationStubWebView: WKWebView {
+    var navigations: [WKNavigation] = []
+    // WKNavigation() lacks WebKit's backing object and crashes on deallocation.
+    // Local HTML produces real navigation identities without provider callbacks or network access.
+    private lazy var navigationSource: WKWebView = {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        return WKWebView(frame: .zero, configuration: configuration)
+    }()
+
+    override func load(_ request: URLRequest) -> WKNavigation? {
+        guard let navigation = navigationSource.loadHTMLString("<html></html>", baseURL: nil) else { return nil }
+        navigations.append(navigation)
+        return navigation
+    }
+
+    override func stopLoading() { navigationSource.stopLoading() }
 }

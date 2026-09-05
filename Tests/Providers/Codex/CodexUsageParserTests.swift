@@ -14,6 +14,16 @@ final class CodexUsageParserTests: XCTestCase {
         XCTAssertEqual(snapshot.fetchedAt, Date(timeIntervalSince1970: 9))
     }
 
+    func testPlusPlanWithOnlyWeeklyWindowDoesNotInventFiveHourQuota() throws {
+        // Synthetic fixture for the weekly-only shape, not an account response.
+        let json = #"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":12,"reset_at":1800000000,"limit_window_seconds":604800},"secondary_window":null}}"#
+        let snapshot = try CodexUsageParser.parse(data: Data(json.utf8))
+
+        XCTAssertEqual(snapshot.planName, "Plus")
+        XCTAssertEqual(snapshot.windows.map(\.kind), [.weekly])
+        XCTAssertEqual(MenuBarPresentation.title(snapshot: snapshot, metric: .remaining), "CX W:88%")
+    }
+
     func testMapsMonthlyWindowForGoPlan() throws {
         let json = #"{"plan_type":"go","rate_limit":{"primary_window":{"used_percent":10,"reset_at":1790494198,"limit_window_seconds":2592000},"secondary_window":null}}"#
 

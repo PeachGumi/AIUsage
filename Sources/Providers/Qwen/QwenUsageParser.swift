@@ -132,8 +132,10 @@ enum QwenUsageError: LocalizedError, Equatable, ProviderAuthenticationError {
     case http(Int)
 
     var requiresAuthentication: Bool {
-        if case .notLoggedIn = self { return true }
-        return false
+        switch self {
+        case .notLoggedIn, .http(401), .http(403): true
+        default: false
+        }
     }
 
     var errorDescription: String? {
