@@ -319,8 +319,13 @@ final class StatusItemController: NSObject {
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.imagePosition = .imageOnly
         button.setAccessibilityRole(.button)
-        button.addObserver(self, forKeyPath: "effectiveAppearance", context: nil)
+        Self.appearanceObservationTarget(application: NSApp)
+            .addObserver(self, forKeyPath: "effectiveAppearance", context: nil)
         recoveryToastController = QuotaRecoveryToastController(anchorView: button)
+    }
+
+    static func appearanceObservationTarget(application: NSApplication) -> NSObject {
+        application
     }
 
     override func observeValue(

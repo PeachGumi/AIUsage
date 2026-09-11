@@ -12,6 +12,7 @@
 		0FD35B5E769A922DF9694FB7 /* OpenCodeGoParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CD476E26D66BDA2D7C753AC /* OpenCodeGoParser.swift */; };
 		11DFD3CD0AF948C801379F58 /* MenuBarPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC9A0C207D6AB5AB978DC649 /* MenuBarPresentationTests.swift */; };
 		1BFFF8AF560ACF398482F620 /* QwenProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42FE90A107F232E296836F34 /* QwenProviderTests.swift */; };
+		1FBF5F15F3BE337ADE68E319 /* StatusItemControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 236AD071713F34C10F30230C /* StatusItemControllerTests.swift */; };
 		230638D86607BE2B950ABE4B /* ProviderVisualsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDFBE5767B0B229DB1A1CA9C /* ProviderVisualsTests.swift */; };
 		24A25A219EC8CB2226F078B0 /* UsageWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA94B52F2B0B8D95CE6388FB /* UsageWindowTests.swift */; };
 		2742ADA97404906D2D44F1CE /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B08063647294A9695B542E /* StatusItemController.swift */; };
@@ -68,6 +69,7 @@
 		0AE9FCBE6F9DFFEB7D5A370A /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		2002D6482E0E73F406745B67 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
 		21F3F4052F461135272C44C6 /* MenuBarPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPresentation.swift; sourceTree = "<group>"; };
+		236AD071713F34C10F30230C /* StatusItemControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemControllerTests.swift; sourceTree = "<group>"; };
 		2555313622A85A5E1B06B280 /* AIUsage.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIUsage.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		280FEE8A34795CB5B1E0D86F /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		38B24110A33BF7F2AAC0FE9A /* SettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreTests.swift; sourceTree = "<group>"; };
@@ -135,6 +137,7 @@
 			children = (
 				5DB6F19AF92DE18B6DEE5C93 /* LoginSuccessRulesTests.swift */,
 				FDFBE5767B0B229DB1A1CA9C /* ProviderVisualsTests.swift */,
+				236AD071713F34C10F30230C /* StatusItemControllerTests.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -403,6 +406,7 @@
 				1BFFF8AF560ACF398482F620 /* QwenProviderTests.swift in Sources */,
 				0A5DCEC392731FC46E3CB929 /* QwenUsageParserTests.swift in Sources */,
 				6E5526A3597C37AEAAFEEA26 /* SettingsStoreTests.swift in Sources */,
+				1FBF5F15F3BE337ADE68E319 /* StatusItemControllerTests.swift in Sources */,
 				4EF365AA40E7C1104C6143D3 /* UsageCoordinatorTests.swift in Sources */,
 				AA7EE4064D003E5D143B1362 /* UsageSeverityTests.swift in Sources */,
 				24A25A219EC8CB2226F078B0 /* UsageWindowTests.swift in Sources */,
