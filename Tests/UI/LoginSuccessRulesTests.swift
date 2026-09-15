@@ -31,6 +31,11 @@ final class LoginSuccessRulesTests: XCTestCase {
         XCTAssertFalse(LoginSuccessRules.isSuccess(
             provider: .openCodeGo,
             url: URL(string: "http://opencode.ai/console/")!))
+        // The GitHub leg of the sign-in flow is navigation, never a signed-in
+        // destination, or the window would close before the OAuth callback.
+        XCTAssertFalse(LoginSuccessRules.isSuccess(
+            provider: .openCodeGo,
+            url: URL(string: "https://github.com/login/oauth/authorize?client_id=app")!))
     }
 
     func testQwenRequiresBillingPageOnExpectedHost() {

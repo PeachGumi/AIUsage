@@ -20,6 +20,17 @@ enum LoginSuccessRules {
 
 @MainActor
 final class WebLoginWindowController: NSObject, NSWindowDelegate {
+    /// Hosts the OpenCode login window may visit. Signing in with GitHub leaves
+    /// opencode.ai for github.com, which renders its login page from
+    /// github.githubassets.com.
+    static let openCodeGoAllowedHosts: Set<String> = [
+        "opencode.ai",
+        "auth.opencode.ai",
+        "github.com",
+        "github.githubassets.com",
+        "avatars.githubusercontent.com",
+    ]
+
     private let provider: ProviderID
     private let accountLabel: String?
     private let startURL: URL
@@ -97,12 +108,16 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func navigationPolicy(for url: URL) -> WKNavigationActionPolicy {
+    func navigationPolicy(for url: URL) -> WKNavigationActionPolicy {
         guard url.scheme == "https" else { return .cancel }
         let allowedHosts: Set<String>
         switch provider {
         case .openCodeGo:
-            allowedHosts = ["opencode.ai", "auth.opencode.ai"]
+            // Signing in with GitHub redirects to github.com, whose login page
+            // serves its stylesheet and scripts from github.githubassets.com.
+            // Cancelling any of these hosts silently stops the OAuth round
+            // trip: "Continue with GitHub" appears to do nothing at all.
+            allowedHosts = Self.openCodeGoAllowedHosts
         case .qwen:
             allowedHosts = [
                 "home.qwencloud.com",
