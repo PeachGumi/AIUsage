@@ -45,7 +45,9 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
     }
 
     func show() {
-        if let window {
+        // A window kept from a previous close is not reusable: tearDown dropped
+        // its web view. Replace it with a fresh window.
+        if let window, webView != nil {
             present(window)
             return
         }
@@ -59,13 +61,8 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
             configuration: configuration)
         webView.navigationDelegate = self
 
-        let window = NSWindow(
-            contentRect: webView.frame,
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
-            backing: .buffered,
-            defer: false)
+        let window = Self.makeWindow(contentView: webView)
         window.title = "Sign in to \(provider.displayName)\(accountLabel.map { " — \($0)" } ?? "")"
-        window.contentView = webView
         window.delegate = self
         window.center()
 
@@ -73,6 +70,22 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
         self.window = window
         present(window)
         webView.load(URLRequest(url: startURL))
+    }
+
+    /// ARC owns the login window, so AppKit must not release it as well:
+    /// `isReleasedWhenClosed` defaults to true for programmatically created
+    /// windows, which over-releases the window while it is being closed and
+    /// crashes the app inside a later AppKit pass (EXC_BAD_ACCESS in
+    /// objc_release right after the user closes the sign-in window).
+    static func makeWindow(contentView: NSView) -> NSWindow {
+        let window = NSWindow(
+            contentRect: contentView.frame,
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = contentView
+        return window
     }
 
     func close() {
@@ -123,9 +136,19 @@ final class WebLoginWindowController: NSObject, NSWindowDelegate {
     private func tearDown(orderOut: Bool) {
         cancelPendingSuccess()
         webView?.stopLoading()
-        if orderOut { window?.orderOut(nil) }
-        window = nil
         webView = nil
+        guard let window else { return }
+        if orderOut {
+            // Not called from -[NSWindow close]: safe to release right away.
+            window.orderOut(nil)
+            self.window = nil
+        } else {
+            // windowWillClose runs inside -[NSWindow close]; releasing the window
+            // here would free it while AppKit is still closing it. Detach the
+            // page and keep the window until the next sign-in, close, or
+            // provider teardown replaces it.
+            window.contentView = nil
+        }
     }
 
     private func cancelPendingSuccess() {
