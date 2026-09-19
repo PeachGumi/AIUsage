@@ -8,7 +8,8 @@ enum LoginSuccessRules {
         case .openCodeGo:
             guard url.host == "opencode.ai" else { return false }
             let path = url.path
-            return path == "/console" || path.hasPrefix("/console/") ||
+            return path == "/console" || path == "/console/" ||
+                path.range(of: #"^/console/wrk_[A-Za-z0-9_-]+(?:/go)?/?$"#, options: .regularExpression) != nil ||
                 path.range(of: #"^/workspace/wrk_[A-Za-z0-9_-]+(?:/go)?/?$"#, options: .regularExpression) != nil
         case .qwen:
             return url.host == "home.qwencloud.com" && url.path.hasPrefix("/billing/")

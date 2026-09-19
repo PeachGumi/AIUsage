@@ -22,6 +22,12 @@ final class LoginSuccessRulesTests: XCTestCase {
         XCTAssertTrue(LoginSuccessRules.isSuccess(
             provider: .openCodeGo,
             url: URL(string: "https://opencode.ai/console/")!))
+        XCTAssertTrue(LoginSuccessRules.isSuccess(
+            provider: .openCodeGo,
+            url: URL(string: "https://opencode.ai/console/wrk_example/go")!))
+        XCTAssertFalse(LoginSuccessRules.isSuccess(
+            provider: .openCodeGo,
+            url: URL(string: "https://opencode.ai/console/login")!))
         XCTAssertFalse(LoginSuccessRules.isSuccess(
             provider: .openCodeGo,
             url: URL(string: "https://opencode.ai/")!))

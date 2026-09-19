@@ -13,6 +13,34 @@ final class LiveProviderTests: XCTestCase {
         report(provider: "Codex", snapshot: snapshot)
     }
 
+    func testCodexRefreshesExpiredAccessTokenLive() async throws {
+        try requireOptIn()
+        let fileManager = FileManager.default
+        let profile = fileManager.temporaryDirectory
+            .appendingPathComponent("aiusage-codex-live-\(UUID().uuidString)", isDirectory: true)
+        let authFile = profile.appendingPathComponent("auth.json", isDirectory: false)
+        defer { try? fileManager.removeItem(at: profile) }
+
+        try fileManager.createDirectory(at: profile, withIntermediateDirectories: true)
+        try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: profile.path)
+        let sourceData = try Data(contentsOf: CodexAuth.authFileURL(), options: .mappedIfSafe)
+        guard var document = try JSONSerialization.jsonObject(with: sourceData) as? [String: Any],
+              var tokens = document["tokens"] as? [String: Any]
+        else {
+            return XCTFail("Codex auth.json did not contain the expected token object")
+        }
+        tokens["access_token"] = "expired-live-test-token"
+        document["tokens"] = tokens
+        try JSONSerialization.data(withJSONObject: document).write(to: authFile, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: authFile.path)
+
+        let snapshot = try await CodexProvider(authFileURL: authFile).fetch()
+
+        XCTAssertEqual(snapshot.provider, .codex)
+        XCTAssertNotEqual(try CodexAuth.load(fileURL: authFile).accessToken, "expired-live-test-token")
+        report(provider: "Codex refreshed profile", snapshot: snapshot)
+    }
+
     func testQwenLiveAccount() async throws {
         try requireOptIn()
         do {

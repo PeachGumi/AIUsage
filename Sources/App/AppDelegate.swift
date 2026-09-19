@@ -154,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 missingMessage: "Choose this Codex account's auth.json with Account… before refreshing this card.",
                 defaultProvider: { CodexProvider() },
                 configuredProvider: { url in
-                    CodexProvider(authLoader: { try CodexAuth.load(fileURL: url) })
+                    CodexProvider(authFileURL: url)
                 })
 
         case .claude:
@@ -296,8 +296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 instance,
                 title: "Choose this Codex account's auth.json",
                 message: isDefault
-                    ? "Choose an auth.json for this card, or use the normal Codex profile. AIUsage reads the file in place and never modifies it."
-                    : "This duplicate card requires an auth.json from a separate Codex profile. AIUsage reads it in place and never modifies it.")
+                    ? "Choose an auth.json for this card, or use the normal Codex profile. AIUsage reads it in place and lets the installed Codex CLI refresh expired access tokens."
+                    : "This duplicate card requires an auth.json from a separate Codex profile. AIUsage reads it in place and lets the installed Codex CLI refresh expired access tokens.")
         case .claude:
             chooseCredentialFile(
                 instance,
@@ -447,10 +447,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func workspaceID(from url: URL) -> String? {
         let parts = url.pathComponents
-        guard let index = parts.firstIndex(of: "workspace"),
-              parts.indices.contains(index + 1) else { return nil }
-        let candidate = parts[index + 1]
-        return candidate.hasPrefix("wrk_") ? candidate : nil
+        for marker in ["console", "workspace"] {
+            guard let index = parts.firstIndex(of: marker),
+                  parts.indices.contains(index + 1) else { continue }
+            let candidate = parts[index + 1]
+            if candidate.hasPrefix("wrk_") { return candidate }
+        }
+        return nil
     }
 
     private func logout(_ instanceID: UUID) async {

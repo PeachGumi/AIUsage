@@ -2,6 +2,12 @@ import AppKit
 import Foundation
 import WebKit
 
+enum OpenCodeGoNavigationDecision: Equatable {
+    case allow
+    case cancelSubframe
+    case rejectMainFrame
+}
+
 /// GoUsage-compatible OpenCode Go fetcher. Each provider instance can receive a
 /// distinct persistent WKWebsiteDataStore, allowing simultaneous accounts.
 @MainActor
@@ -11,12 +17,14 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     private let workspaceStore: OpenCodeWorkspaceStore
     private let webView: WKWebView
     private let hiddenWindow: NSWindow
+    private let consoleSnapshotLoader: (() async throws -> ProviderSnapshot)?
     private var continuation: CheckedContinuation<ProviderSnapshot, Error>?
     private var activeGeneration = 0
     private var activeNavigation: WKNavigation?
     private var scrapeTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
     private var scrapeRetries = 0
+    private var hasRetriedConsoleAfterDashboardLoad = false
     private(set) var lastObservedURL: URL?
 
     private var startURL: URL {
@@ -28,9 +36,20 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     init(
         workspaceStore: OpenCodeWorkspaceStore = OpenCodeWorkspaceStore(),
         dataStore: WKWebsiteDataStore = .default(),
-        injectedWebView: WKWebView? = nil)
+        injectedWebView: WKWebView? = nil,
+        consoleSnapshotLoader: (() async throws -> ProviderSnapshot)? = nil)
     {
         self.workspaceStore = workspaceStore
+        if let consoleSnapshotLoader {
+            self.consoleSnapshotLoader = consoleSnapshotLoader
+        } else if injectedWebView == nil {
+            let client = OpenCodeGoConsoleClient(
+                workspaceStore: workspaceStore,
+                dataStore: dataStore)
+            self.consoleSnapshotLoader = { try await client.fetch() }
+        } else {
+            self.consoleSnapshotLoader = nil
+        }
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = dataStore
         webView = injectedWebView ?? WKWebView(
@@ -47,9 +66,27 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     }
 
     func fetch() async throws -> ProviderSnapshot {
+        if let consoleSnapshotLoader {
+            do {
+                return try await consoleSnapshotLoader()
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as OpenCodeGoError where error == .notSubscribed {
+                throw error
+            } catch {
+                // The console JSON endpoint is preferred because it is the data
+                // source used by the dashboard. Keep the DOM path as a fallback
+                // for transient endpoint or schema failures.
+            }
+        }
+        return try await fetchDashboard()
+    }
+
+    private func fetchDashboard() async throws -> ProviderSnapshot {
         guard continuation == nil else { throw OpenCodeGoError.navigation("refresh already in progress") }
         activeGeneration += 1
         scrapeRetries = 0
+        hasRetriedConsoleAfterDashboardLoad = false
         let generation = activeGeneration
         defer { Task { @MainActor in self.lastObservedURL = nil } }
         return try await withCheckedThrowingContinuation { continuation in
@@ -87,6 +124,26 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
     }
 
     func scrape(generation: Int) {
+        if let consoleSnapshotLoader, !hasRetriedConsoleAfterDashboardLoad {
+            hasRetriedConsoleAfterDashboardLoad = true
+            Task { [weak self] in
+                do {
+                    let snapshot = try await consoleSnapshotLoader()
+                    self?.complete(generation: generation, .success(snapshot))
+                } catch is CancellationError {
+                    self?.complete(generation: generation, .failure(CancellationError()))
+                } catch let error as OpenCodeGoError where error == .notSubscribed {
+                    self?.complete(generation: generation, .failure(error))
+                } catch {
+                    self?.scrapeDashboard(generation: generation)
+                }
+            }
+            return
+        }
+        scrapeDashboard(generation: generation)
+    }
+
+    private func scrapeDashboard(generation: Int) {
         webView.evaluateJavaScript(Self.scrapeJS) { [weak self] value, error in
             Task { @MainActor in
                 guard let self, self.activeGeneration == generation, self.continuation != nil else { return }
@@ -147,19 +204,34 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
               let urlText = object["url"] as? String,
               let url = URL(string: urlText),
               url.host == "opencode.ai",
-              url.path.range(of: #"^/workspace/wrk_[A-Za-z0-9_-]+(/go)?$"#, options: .regularExpression) != nil,
               let items = object["items"] as? [[String: Any]], items.isEmpty
         else { return nil }
-        let path = url.path.hasSuffix("/go") ? url.path : url.path + "/go"
-        return URL(string: "https://opencode.ai" + path)
+        let consolePattern = #"^/console/(wrk_[A-Za-z0-9_-]+)(?:/go)?/?$"#
+        let legacyPattern = #"^/workspace/(wrk_[A-Za-z0-9_-]+)(?:/go)?/?$"#
+        let path = url.path
+        if path.range(of: consolePattern, options: .regularExpression) != nil {
+            let base = path.hasSuffix("/") ? String(path.dropLast()) : path
+            return URL(string: "https://opencode.ai" + (base.hasSuffix("/go") ? base : base + "/go"))
+        }
+        guard let match = path.range(of: legacyPattern, options: .regularExpression) else { return nil }
+        let legacy = String(path[match])
+        let components = legacy.split(separator: "/")
+        guard components.count >= 2 else { return nil }
+        return URL(string: "https://opencode.ai/console/\(components[1])/go")
     }
 
-    private func isAllowedScraperURL(_ url: URL) -> Bool {
+    private static func isAllowedScraperURL(_ url: URL) -> Bool {
         guard url.scheme == "https" else { return false }
         return url.host == "opencode.ai" || url.host == "auth.opencode.ai"
     }
 
-    private static let scrapeJS = """
+    static func navigationDecision(for url: URL?, isMainFrame: Bool?) -> OpenCodeGoNavigationDecision {
+        guard let url else { return .rejectMainFrame }
+        if isAllowedScraperURL(url) { return .allow }
+        return isMainFrame == false ? .cancelSubframe : .rejectMainFrame
+    }
+
+    static let scrapeJS = """
     (function(){
       var items = document.querySelectorAll('[data-slot="usage-item"]');
       var out = [];
@@ -168,26 +240,53 @@ final class OpenCodeGoProvider: NSObject, UsageProvider {
         var q = function(s){ var n = el.querySelector(s); return n && n.textContent ? n.textContent.trim() : ''; };
         out.push({ label: q('[data-slot="usage-label"]'), value: q('[data-slot="usage-value"]'), reset: q('[data-slot="reset-time"]') });
       }
+      if (!out.length) {
+        var section = document.querySelector('[aria-label="Go usage limits"]');
+        var cards = section ? section.children : [];
+        for (var c = 0; c < cards.length; c++) {
+          var nodes = cards[c].querySelectorAll('*');
+          var label = '';
+          var value = '';
+          var reset = '';
+          for (var n = 0; n < nodes.length; n++) {
+            var text = (nodes[n].textContent || '').trim();
+            if (!label && /^(Rolling|Weekly|Monthly) usage$/i.test(text)) label = text;
+            if (!value && /^\\d+(?:\\.\\d+)?\\s*%$/.test(text)) value = text;
+            if (!reset && /^Resets in\\b/i.test(text)) reset = nodes[n].getAttribute('title') || text;
+          }
+          if (label || value) out.push({ label: label, value: value, reset: reset });
+        }
+      }
       var promo = !!document.querySelector('[data-slot="subscribe-button"]');
       var other = !!document.querySelector('[data-slot="other-message"]');
       var cb = document.querySelector('form[data-slot="setting-row"] input[type="checkbox"]');
-      var links = document.querySelectorAll('a[href*="/workspace/wrk_"]');
+      var links = document.querySelectorAll('a[href]');
       var target = '';
       for (var j = 0; j < links.length; j++) {
-        var href = links[j].href || '';
-        if (href.indexOf('/go') >= 0) { target = href; break; }
+        try {
+          var link = new URL(links[j].href || '', location.origin);
+          if (link.host === 'opencode.ai' && /^\\/console\\/wrk_[A-Za-z0-9_-]+\\/go\\/?$/.test(link.pathname)) {
+            target = link.href;
+            break;
+          }
+        } catch (_) {}
       }
       if (!target) {
         var html = document.documentElement.innerHTML;
-        var match = html.match(/(?:https:\\/\\/opencode\\.ai)?(\\/workspace\\/wrk_[A-Za-z0-9_-]+)(?:\\/go)?/);
-        if (match) { target = 'https://opencode.ai' + match[1] + '/go'; }
+        var current = html.match(/(?:https:\\/\\/opencode\\.ai)?(\\/console\\/wrk_[A-Za-z0-9_-]+)(?:\\/go)?/);
+        var legacy = html.match(/(?:https:\\/\\/opencode\\.ai)?(\\/workspace\\/wrk_[A-Za-z0-9_-]+)(?:\\/go)?/);
+        if (current) { target = 'https://opencode.ai' + current[1] + '/go'; }
+        else if (legacy) {
+          var workspace = legacy[1].split('/').pop();
+          target = 'https://opencode.ai/console/' + workspace + '/go';
+        }
       }
       if (!target) {
         var scripts = document.querySelectorAll('script');
         for (var k = 0; k < scripts.length && !target; k++) {
           var text = scripts[k].textContent || '';
           var m = text.match(/wrk_[A-Za-z0-9_-]{8,}/);
-          if (m) { target = 'https://opencode.ai/workspace/' + m[0] + '/go'; }
+          if (m) { target = 'https://opencode.ai/console/' + m[0] + '/go'; }
         }
       }
       return JSON.stringify({
@@ -207,12 +306,21 @@ extension OpenCodeGoProvider: WKNavigationDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void)
     {
-        guard let url = navigationAction.request.url, isAllowedScraperURL(url) else {
+        switch Self.navigationDecision(
+            for: navigationAction.request.url,
+            isMainFrame: navigationAction.targetFrame?.isMainFrame)
+        {
+        case .allow:
+            decisionHandler(.allow)
+        case .cancelSubframe:
+            // The current Go console embeds Stripe payment UI. That subframe is
+            // unrelated to usage scraping; suppress it without failing the
+            // main opencode.ai navigation.
+            decisionHandler(.cancel)
+        case .rejectMainFrame:
             decisionHandler(.cancel)
             complete(generation: activeGeneration, .failure(OpenCodeGoError.navigation("blocked navigation to an unexpected host")))
-            return
         }
-        decisionHandler(.allow)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -229,6 +337,180 @@ extension OpenCodeGoProvider: WKNavigationDelegate {
         guard let navigation, navigation === activeNavigation, continuation != nil else { return }
         complete(generation: activeGeneration, .failure(OpenCodeGoError.navigation(error.localizedDescription)))
     }
+}
+
+@MainActor
+final class OpenCodeGoConsoleClient {
+    typealias CookieLoader = () async -> [HTTPCookie]
+    typealias RequestLoader = (URLRequest) async throws -> (Data, URLResponse)
+
+    private static let organizationsURL = URL(string: "https://opencode.ai/console/api/orgs")!
+    private static let statusURL = URL(string: "https://opencode.ai/console/api/go/status")!
+
+    private let workspaceStore: OpenCodeWorkspaceStore
+    private let cookieLoader: CookieLoader
+    private let requestLoader: RequestLoader
+
+    init(
+        workspaceStore: OpenCodeWorkspaceStore,
+        cookieLoader: @escaping CookieLoader,
+        requestLoader: @escaping RequestLoader)
+    {
+        self.workspaceStore = workspaceStore
+        self.cookieLoader = cookieLoader
+        self.requestLoader = requestLoader
+    }
+
+    convenience init(
+        workspaceStore: OpenCodeWorkspaceStore,
+        dataStore: WKWebsiteDataStore,
+        session: URLSession = OpenCodeGoConsoleClient.makeSession())
+    {
+        self.init(
+            workspaceStore: workspaceStore,
+            cookieLoader: {
+                await withCheckedContinuation { continuation in
+                    dataStore.httpCookieStore.getAllCookies {
+                        continuation.resume(returning: $0)
+                    }
+                }
+            },
+            requestLoader: { request in
+                try await session.data(for: request)
+            })
+    }
+
+    func fetch() async throws -> ProviderSnapshot {
+        let cookies = await cookieLoader()
+        guard Self.hasConsoleSession(cookies) else { throw OpenCodeGoError.notLoggedIn }
+
+        let workspaceID: String
+        if let stored = workspaceStore.workspaceID {
+            workspaceID = stored
+        } else {
+            let organizationsRequest = try Self.makeOrganizationsRequest(cookies: cookies)
+            let organizationsData = try await load(organizationsRequest)
+            do {
+                workspaceID = try Self.parseWorkspaceID(data: organizationsData)
+            } catch {
+                throw OpenCodeGoConsoleError.unavailable
+            }
+            workspaceStore.save(workspaceID)
+        }
+
+        let statusRequest = try Self.makeStatusRequest(
+            workspaceID: workspaceID,
+            cookies: cookies)
+        let statusData = try await load(statusRequest)
+        do {
+            return try OpenCodeGoConsoleStatusParser.parse(data: statusData)
+        } catch let error as OpenCodeGoError where error == .notSubscribed {
+            throw error
+        } catch {
+            throw OpenCodeGoConsoleError.unavailable
+        }
+    }
+
+    nonisolated static func parseWorkspaceID(data: Data) throws -> String {
+        guard let organizations = try? JSONDecoder().decode([Organization].self, from: data),
+              let workspaceID = organizations.map(\.id).first(where: { candidate in
+                  candidate.range(
+                      of: #"^wrk_[A-Za-z0-9_\-]{3,128}$"#,
+                      options: .regularExpression) != nil
+              })
+        else { throw OpenCodeGoError.invalidResponse }
+        return workspaceID
+    }
+
+    static func makeOrganizationsRequest(cookies: [HTTPCookie]) throws -> URLRequest {
+        try makeRequest(url: organizationsURL, workspaceID: nil, cookies: cookies)
+    }
+
+    static func makeStatusRequest(workspaceID: String, cookies: [HTTPCookie]) throws -> URLRequest {
+        guard workspaceID.range(
+            of: #"^wrk_[A-Za-z0-9_\-]{3,128}$"#,
+            options: .regularExpression) != nil
+        else { throw OpenCodeGoError.invalidResponse }
+        return try makeRequest(url: statusURL, workspaceID: workspaceID, cookies: cookies)
+    }
+
+    static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        return URLSession(
+            configuration: configuration,
+            delegate: RejectRedirectDelegate(),
+            delegateQueue: nil)
+    }
+
+    private static func makeRequest(
+        url: URL,
+        workspaceID: String?,
+        cookies: [HTTPCookie]
+    ) throws -> URLRequest {
+        let matchingCookies = cookies.filter(Self.isUsableOpenCodeCookie)
+        guard !matchingCookies.isEmpty else { throw OpenCodeGoError.notLoggedIn }
+
+        var request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 20)
+        request.httpMethod = "GET"
+        if let workspaceID {
+            request.setValue(workspaceID, forHTTPHeaderField: "x-org-id")
+        }
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let cookieHeaders = HTTPCookie.requestHeaderFields(with: matchingCookies)
+        request.setValue(cookieHeaders["Cookie"], forHTTPHeaderField: "Cookie")
+        request.setValue("AIUsage/1.0", forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    private static func hasConsoleSession(_ cookies: [HTTPCookie]) -> Bool {
+        cookies.contains { cookie in
+            isUsableOpenCodeCookie(cookie) &&
+                (cookie.name == "__Host-console_session" || cookie.name == "console_session")
+        }
+    }
+
+    private static func isUsableOpenCodeCookie(_ cookie: HTTPCookie) -> Bool {
+        let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return domain == "opencode.ai" && (cookie.expiresDate == nil || cookie.expiresDate! > Date())
+    }
+
+    private func load(_ request: URLRequest) async throws -> Data {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await requestLoader(request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw OpenCodeGoConsoleError.unavailable
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw OpenCodeGoConsoleError.unavailable
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw OpenCodeGoError.notLoggedIn
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw OpenCodeGoConsoleError.unavailable
+        }
+        return data
+    }
+
+    private struct Organization: Decodable {
+        let id: String
+    }
+}
+
+enum OpenCodeGoConsoleError: Error {
+    case unavailable
 }
 
 /// Parser for OpenCode's lightweight Go usage endpoint. This endpoint is used

@@ -16,12 +16,12 @@ final class OpenCodeWorkspaceStoreTests: XCTestCase {
 
         let store = OpenCodeWorkspaceStore(defaults: defaults, legacyURL: legacy)
         XCTAssertEqual(store.workspaceID, "wrk_migrated123")
-        XCTAssertEqual(store.usageURL.absoluteString, "https://opencode.ai/workspace/wrk_migrated123/go")
+        XCTAssertEqual(store.usageURL.absoluteString, "https://opencode.ai/console/wrk_migrated123/go")
 
         store.clear()
         let afterSignOut = OpenCodeWorkspaceStore(defaults: defaults, legacyURL: legacy)
         XCTAssertNil(afterSignOut.workspaceID)
-        XCTAssertEqual(afterSignOut.usageURL.absoluteString, "https://opencode.ai/workspace")
+        XCTAssertEqual(afterSignOut.usageURL.absoluteString, "https://opencode.ai/console/")
     }
 
     func testUsesGenericWorkspacePageWhenNoIDExists() {
@@ -33,7 +33,7 @@ final class OpenCodeWorkspaceStoreTests: XCTestCase {
         let store = OpenCodeWorkspaceStore(defaults: defaults, legacyURL: missing)
 
         XCTAssertNil(store.workspaceID)
-        XCTAssertEqual(store.usageURL.absoluteString, "https://opencode.ai/workspace")
+        XCTAssertEqual(store.usageURL.absoluteString, "https://opencode.ai/console/")
     }
 
     func testClearRemovesSavedWorkspace() {
@@ -49,7 +49,7 @@ final class OpenCodeWorkspaceStoreTests: XCTestCase {
         store.clear()
 
         XCTAssertNil(store.workspaceID)
-        XCTAssertEqual(store.usageURL.absoluteString, "https://opencode.ai/workspace")
+        XCTAssertEqual(store.usageURL.absoluteString, "https://opencode.ai/console/")
         XCTAssertNil(OpenCodeWorkspaceStore(defaults: defaults, legacyURL: missing).workspaceID)
     }
 }

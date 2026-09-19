@@ -54,6 +54,7 @@ enum OpenCodeGoParser {
     private static func kind(from label: String?) -> UsageWindowKind? {
         guard let label = label?.lowercased() else { return nil }
         if (label.contains("hour") && (label.contains("5") || label.contains("five")))
+            || label.contains("rolling")
             || (label.contains("時間") && label.contains("5")) { return .fiveHour }
         if label.contains("week") || label.contains("週") { return .weekly }
         if label.contains("month") || label.contains("月") { return .monthly }
@@ -73,17 +74,25 @@ enum OpenCodeGoParser {
     private static func pageError(_ response: Response) -> OpenCodeGoError {
         if response.promo == true { return .notSubscribed }
         if response.other == true { return .otherWorkspaceMember }
-        if response.url.contains("/auth") || response.url.contains("auth.opencode.ai") { return .notLoggedIn }
+        if response.url.contains("/auth") ||
+            response.url.contains("auth.opencode.ai") ||
+            response.url.contains("/console/login")
+        {
+            return .notLoggedIn
+        }
         return .invalidResponse
     }
 
     private static func workspaceID(_ urlText: String) -> String? {
-        guard let url = URL(string: urlText),
-              let index = url.pathComponents.firstIndex(of: "workspace"),
-              url.pathComponents.indices.contains(index + 1)
-        else { return nil }
-        let candidate = url.pathComponents[index + 1]
-        return candidate.hasPrefix("wrk_") ? candidate : nil
+        guard let url = URL(string: urlText) else { return nil }
+        for marker in ["console", "workspace"] {
+            guard let index = url.pathComponents.firstIndex(of: marker),
+                  url.pathComponents.indices.contains(index + 1)
+            else { continue }
+            let candidate = url.pathComponents[index + 1]
+            if candidate.hasPrefix("wrk_") { return candidate }
+        }
+        return nil
     }
 
     private static func planName(useBalance: Bool?) -> String {
@@ -103,6 +112,81 @@ enum OpenCodeGoParser {
         let label: String?
         let value: String?
         let reset: String?
+    }
+}
+
+enum OpenCodeGoConsoleStatusParser {
+    static func parse(data: Data, now: Date = Date()) throws -> ProviderSnapshot {
+        guard let response = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw OpenCodeGoError.invalidResponse
+        }
+        guard let access = response.access else { throw OpenCodeGoError.notSubscribed }
+
+        let inputs: [(UsageWindowKind, String, Meter, String?)] = [
+            (.fiveHour, "Rolling usage", access.meters.fiveHour, access.meters.fiveHour.resetsAt),
+            (.weekly, "Weekly usage", access.meters.week, access.meters.week.resetsAt),
+            (.monthly, "Monthly usage", access.meters.month, access.endsAt),
+        ]
+        let windows = try inputs.map { kind, label, meter, resetText in
+            let usedPercent = try percent(used: meter.usedMicroCents, limit: meter.limitMicroCents)
+            return try UsageWindow(
+                kind: kind,
+                label: label,
+                usedPercent: usedPercent,
+                resetsAt: resetText.flatMap(parseISO8601),
+                resetDescription: resetText)
+        }
+        let planName = response.useBalance.map {
+            "OpenCode Go · balance fallback \($0 ? "on" : "off")"
+        } ?? "OpenCode Go"
+        return ProviderSnapshot(
+            provider: .openCodeGo,
+            planName: planName,
+            windows: windows,
+            fetchedAt: now)
+    }
+
+    private static func percent(used: String, limit: String) throws -> Double {
+        let locale = Locale(identifier: "en_US_POSIX")
+        guard let usedValue = Decimal(string: used, locale: locale),
+              let limitValue = Decimal(string: limit, locale: locale),
+              usedValue >= 0,
+              limitValue > 0
+        else { throw OpenCodeGoError.invalidResponse }
+        let value = NSDecimalNumber(decimal: usedValue / limitValue * 100).doubleValue
+        guard value.isFinite, value >= 0 else { throw OpenCodeGoError.invalidResponse }
+        return min(value, 100)
+    }
+
+    private static func parseISO8601(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: value)
+    }
+
+    private struct Response: Decodable {
+        let access: Access?
+        let useBalance: Bool?
+    }
+
+    private struct Access: Decodable {
+        let endsAt: String
+        let meters: Meters
+    }
+
+    private struct Meters: Decodable {
+        let fiveHour: Meter
+        let week: Meter
+        let month: Meter
+    }
+
+    private struct Meter: Decodable {
+        let usedMicroCents: String
+        let limitMicroCents: String
+        let resetsAt: String?
     }
 }
 

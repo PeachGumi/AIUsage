@@ -36,8 +36,8 @@ final class OpenCodeWorkspaceStore {
     }
 
     var usageURL: URL {
-        guard let workspaceID else { return URL(string: "https://opencode.ai/workspace")! }
-        return URL(string: "https://opencode.ai/workspace/\(workspaceID)/go")!
+        guard let workspaceID else { return URL(string: "https://opencode.ai/console/")! }
+        return URL(string: "https://opencode.ai/console/\(workspaceID)/go")!
     }
 
     func save(_ candidate: String) {
