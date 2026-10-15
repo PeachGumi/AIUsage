@@ -164,9 +164,16 @@ final class OpenCodeGoParserTests: XCTestCase {
         XCTAssertEqual(snapshot.planName, "OpenCode Go · balance fallback on")
         XCTAssertEqual(snapshot.windows.map(\.kind), [.fiveHour, .weekly, .monthly])
         XCTAssertEqual(snapshot.windows.map(\.usedPercent), [12.5, 25, 37.5])
-        XCTAssertEqual(snapshot.windows[0].resetDescription, "2026-09-20T01:00:00Z")
-        XCTAssertEqual(snapshot.windows[1].resetDescription, "2026-09-21T00:00:00Z")
-        XCTAssertEqual(snapshot.windows[2].resetDescription, "2026-10-01T00:00:00Z")
+        // A parsed reset date must reach the UI's local-time formatter rather
+        // than being overridden by the raw UTC response string.
+        XCTAssertTrue(snapshot.windows.allSatisfy { $0.resetDescription == nil })
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        XCTAssertEqual(snapshot.windows.compactMap(\.resetsAt).map(formatter.string(from:)), [
+            "2026-09-20 10:00", "2026-09-21 09:00", "2026-10-01 09:00",
+        ])
         XCTAssertEqual(snapshot.fetchedAt, now)
     }
 

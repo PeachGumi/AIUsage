@@ -129,12 +129,14 @@ enum OpenCodeGoConsoleStatusParser {
         ]
         let windows = try inputs.map { kind, label, meter, resetText in
             let usedPercent = try percent(used: meter.usedMicroCents, limit: meter.limitMicroCents)
+            let resetDate = resetText.flatMap(parseISO8601)
             return try UsageWindow(
                 kind: kind,
                 label: label,
                 usedPercent: usedPercent,
-                resetsAt: resetText.flatMap(parseISO8601),
-                resetDescription: resetText)
+                resetsAt: resetDate,
+                // Let the UI format valid dates in the Mac's local time zone.
+                resetDescription: resetDate == nil ? resetText : nil)
         }
         let planName = response.useBalance.map {
             "OpenCode Go · balance fallback \($0 ? "on" : "off")"
