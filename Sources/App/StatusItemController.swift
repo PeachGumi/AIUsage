@@ -445,7 +445,7 @@ final class StatusItemController: NSObject {
             }
         }
         guard let instance = settings.selectedProvider else {
-            let image = renderEmptyImage()
+            let image = Self.renderImage(title: "AI +")
             statusItem.length = image.size.width + 8
             button.image = image
             button.toolTip = "AIUsage: no provider accounts added\nClick: add an account"
@@ -456,7 +456,7 @@ final class StatusItemController: NSObject {
         let snapshot = coordinator.snapshots[instance.id]
         let hasError = coordinator.errors[instance.id] != nil
         let title = displayTitle(instance: instance, snapshot: snapshot, hasError: hasError)
-        let image = renderImage(title: title, snapshot: snapshot, provider: instance.provider, hasError: hasError)
+        let image = Self.renderImage(title: title)
         statusItem.length = image.size.width + 8
         button.image = image
         let tooltip = accessibilityText(instance: instance, snapshot: snapshot, hasError: hasError)
@@ -482,51 +482,19 @@ final class StatusItemController: NSObject {
         return "\(instance.title): \(values)\(hasError ? ", showing stale data" : "")"
     }
 
-    private func renderEmptyImage() -> NSImage {
+    static func renderImage(title: String) -> NSImage {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold),
-            .foregroundColor: NSColor.secondaryLabelColor,
+            .foregroundColor: NSColor.black,
         ]
-        let attributed = NSAttributedString(string: "AI +", attributes: attributes)
+        let attributed = NSAttributedString(string: title, attributes: attributes)
         let size = attributed.size()
-        return NSImage(size: NSSize(width: ceil(size.width), height: 18), flipped: false) { rect in
+        let image = NSImage(size: NSSize(width: ceil(size.width), height: 18), flipped: false) { rect in
             attributed.draw(at: NSPoint(x: 0, y: (rect.height - size.height) / 2))
             return true
         }
-    }
-
-    private func renderImage(
-        title: String,
-        snapshot: ProviderSnapshot?,
-        provider: ProviderID,
-        hasError: Bool) -> NSImage
-    {
-        let font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
-        let prefix = provider.shortName
-        let suffix = String(title.dropFirst(prefix.count))
-        let prefixAttributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: brandColor(provider),
-        ]
-        let valueColor: NSColor = hasError
-            ? .systemOrange
-            : snapshot == nil ? .secondaryLabelColor : severityColor(snapshot?.mostConstrainedRemaining)
-        let suffixAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: valueColor]
-        let attributed = NSMutableAttributedString(string: prefix, attributes: prefixAttributes)
-        attributed.append(NSAttributedString(string: suffix, attributes: suffixAttributes))
-        let size = attributed.size()
-        return NSImage(size: NSSize(width: ceil(size.width), height: 18), flipped: false) { rect in
-            attributed.draw(at: NSPoint(x: 0, y: (rect.height - size.height) / 2))
-            return true
-        }
-    }
-
-    private func severityColor(_ remaining: Double?) -> NSColor {
-        guard let remaining else { return .secondaryLabelColor }
-        return ProviderVisuals.severityRGB(UsageSeverity(remainingPercent: remaining)).nsColor
-    }
-
-    private func brandColor(_ provider: ProviderID) -> NSColor {
-        ProviderVisuals.accentRGB(provider).nsColor
+        // Let macOS select the menu-bar foreground for its current background.
+        image.isTemplate = true
+        return image
     }
 }
