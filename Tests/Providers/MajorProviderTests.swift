@@ -112,6 +112,40 @@ final class MajorProviderTests: XCTestCase {
         XCTAssertNil(AntigravityProvider.csrfToken(from: "/app/language_server"))
     }
 
+    func testAntigravityStatusLineParsesOfficialQuotaPayload() throws {
+        let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let data = Data(#"""
+        {
+          "product":"antigravity",
+          "plan_tier":"Pro",
+          "email":"developer@example.com",
+          "quota":{
+            "gemini-5h":{"remaining_fraction":0.75,"reset_in_seconds":3600},
+            "gemini-weekly":{"remaining_fraction":0.50,"reset_time":"2026-09-01T00:00:00Z"},
+            "claude-weekly":{"remaining_fraction":0.25}
+          }
+        }
+        """#.utf8)
+
+        let snapshot = try AntigravityStatusLineProvider.parseStatusLinePayload(
+            data: data,
+            fetchedAt: fetchedAt)
+
+        XCTAssertEqual(snapshot.provider, .antigravity)
+        XCTAssertEqual(snapshot.planName, "Pro")
+        XCTAssertEqual(snapshot.windows.map(\.remainingPercent), [75, 50, 25])
+        XCTAssertEqual(snapshot.windows.map(\.compactLabel), ["G5", "GW", "CW"])
+        XCTAssertEqual(snapshot.windows.first?.resetsAt, fetchedAt.addingTimeInterval(3600))
+    }
+
+    func testAntigravityStatusLineFailsClosedForWrongProductOrUnknownQuota() {
+        let wrongProduct = Data(#"{"product":"other","quota":{"gemini-weekly":{"remaining_fraction":0.5}}}"#.utf8)
+        XCTAssertThrowsError(try AntigravityStatusLineProvider.parseStatusLinePayload(data: wrongProduct))
+
+        let unknown = Data(#"{"product":"antigravity","quota":{"future-daily":{"remaining_fraction":0.5}}}"#.utf8)
+        XCTAssertThrowsError(try AntigravityStatusLineProvider.parseStatusLinePayload(data: unknown))
+    }
+
     func testCopilotParsesDirectQuotaSnapshots() throws {
         let data = Data(#"""
         {
